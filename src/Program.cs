@@ -1567,6 +1567,19 @@ namespace RocGame
             }
             LogLine("[PASS] 5F. 系統 A–J 全數十項自創戰略機制與 16 結局驗證通過");
 
+            // 5G. 16 種結局全數透過 1950–2025 模擬器實跑達成驗證
+            {
+                var cov = BatchSim.RunEndingCoverageSuite(1000u);
+                var missing = new List<string>();
+                foreach (var ek in GameData.Endings.Keys)
+                {
+                    if (!cov.TryGetValue(ek, out var rr) || rr.EndingKey != ek)
+                        missing.Add($"{ek}(實際={rr?.EndingKey ?? "none"})");
+                }
+                Assert(missing.Count == 0, $"仍有結局無法透過 1950–2025 模擬器實際達成：{string.Join(", ", missing)}");
+            }
+            LogLine("[PASS] 5G. 全數 16 種結局皆可透過 1950–2025 模擬策略實跑達成驗證通過");
+
             // 6. 確認工作區無任何 HTML 檔案
             var htmlFiles = Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, "*.html", SearchOption.AllDirectories);
             Assert(htmlFiles.Length == 0, "輸出目錄不應存在任何 HTML 檔案");

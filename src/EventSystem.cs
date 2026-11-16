@@ -727,7 +727,7 @@ namespace RocGame
                         Label = "促請美國國會強化《台灣關係法》安全條款，並發起自強救國基金",
                         Hint = "共同防禦條約終止、美援歸零，但保留美方防衛承諾、民眾捐獻自強基金（國庫 +8、民心 +5）",
                         Effect = s => {
-                            s.Treaty = false; s.TreatyRestrict = false; s.UsAid = 0; s.UsProtect = true;
+                            s.Treaty = false; s.TreatyRestrict = false; s.UsAid = 0; s.UsProtect = !s.HasFlag("treatyBroken");
                             s.Intl -= 10; s.Treasury += 8; s.Morale += 5;
                             SimEngine.Log(s, "中美斷交，全國發起自強救國捐款，空軍編成「自強中隊」。《台灣關係法》生效。", "bad");
                         }
@@ -843,7 +843,7 @@ namespace RocGame
                     },
                     new() {
                         Label = "趁俄國經濟困頓，以重金贖回北疆占領區或延攬前蘇聯軍工專家",
-                        Hint = "花費國庫 15；若有俄占區則贖回 1 省主權，且陸海空科技各 +0.4",
+                        Hint = "花費國庫 15；若國軍已立足大陸則全面贖回俄占省主權，否則協助遣返俄軍，且陸海空科技各 +0.4",
                         Stance = "北疆外交贖買", StyleTag = "gold",
                         Effect = s => {
                             s.Flags["ussrGone"] = 1; s.PrcSovTension = 0;
@@ -851,10 +851,16 @@ namespace RocGame
                             s.ArmyTech += 0.4; s.NavyTech += 0.4; s.AirTech += 0.4;
                             var uNodes = SimEngine.UssrNodes(s);
                             if (uNodes.Count > 0) {
-                                string back = uNodes[0];
-                                s.Control[back] = Faction.ROC; s.Garrison[back] = 0;
-                                SimEngine.AddUnit(s, "inf", back, 85);
-                                SimEngine.Log(s, $"★ 我方趁莫斯科財政困頓，以巨額經援成功收回【{GameData.Nodes[back].Name}】主權！", "big");
+                                bool hasMainland = SimEngine.HeldMainland(s).Count > 0;
+                                foreach (var back in uNodes) {
+                                    s.Control[back] = hasMainland ? Faction.ROC : Faction.PRC;
+                                    s.Garrison[back] = hasMainland ? 0 : SimEngine.NominalGarrison(s, back);
+                                    if (hasMainland) SimEngine.AddUnit(s, "inf", back, 85);
+                                }
+                                if (hasMainland)
+                                    SimEngine.Log(s, $"★ 我方趁莫斯科財政困頓，以巨額經援成功收回北疆 {uNodes.Count} 省主權！", "big");
+                                else
+                                    SimEngine.Log(s, "蘇軍自中國北疆全數撤軍，北疆各省恢復原先建制與國際均衡。", "good");
                             } else {
                                 SimEngine.Log(s, "大批前蘇聯航太與造船專家秘密來台任教，國防科技突飛猛進！", "good");
                             }

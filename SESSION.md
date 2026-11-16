@@ -458,3 +458,23 @@ Release 建置 0 警告 0 錯誤。`--test` 退出碼 0，報告為全部通過�
     - `rush1950`：5× `full` 拉長至 `1959–2001`（不再 2–4 年速推）。
     - `opportunist`：5× `split_ussr`（2026，17–25 省，北疆須應對蘇聯干涉）。
 - **清理與歸檔**：已清除 `bin\Release\net8.0-windows\` 內測試暫存檔，完整工作區已同步歸檔至 `F:\DOC\misc\roc-grand-strategy-2d-game-20261110\`。
+
+## 2026-11-16 — 全數 16 種結局 1950–2025 模擬實跑驗證（test 5G）
+
+- **問題與排查（G1 證據）**：以初始 `--sim 25 --policy all` 實跑時僅能觸發 5 種結局（`full`、`armistice`、`split_ussr`、`status`、`beachhead`），其餘 11 種結局在純模擬推進中出現以下系統性阻斷：
+  1. `warlordR`：`SimEngine.CheckEnd` 每年元旦在未觸發累加條件時無條件將 `s.Flags["warlordRisk"] = 0` 清零，導致門檻 `>= 3` 難累積。
+  2. `warlordP`／`collapse`：`SimEngine.PrcUpdate` 的穩定度均衡拉力 `(target - s.PrcStab) * 0.20` 在低穩定度時產生強正向拉回，使極限地下顛覆（`underground`／`united_subvert`／`warlordPact`）仍難以把 `PrcStab` 壓在 `<= 0`～`10` 並維持至 2025 結算。
+  3. 派系搶走和平路線：`InferChoiceFaction` 未充分涵蓋海空／情治／經貿選項且無高影響力遞減機制，和平取向在多事件中反覆加到 `army` 超過 `80`，誤轉為 `junta`。
+  4. `end_invaded` 台灣失守後事件反撲：`1991 蘇聯解體`等事件透過 `SimEngine.AddUnit(s, "arm", "TW", 95)` 直接把國軍裝甲師空投進共軍已佔領的 `"TW"` 並導致台北再度易手。
+- **修正落點（`SimEngine.cs`、`BatchSim.cs`、`Program.cs`）**：
+  - `SimEngine.CheckEnd`：`warlordRisk` 僅於 `held.Count == 0 && s.Morale >= 65 && s.SupplyRatio >= 0.95` 時歸零，其餘維持既得割據累計。
+  - `SimEngine.PrcUpdate`：計入 `radio_liberty`／`cyber_psy`／`cultural_psy`／`underground`／`united_subvert`、平均動盪（`> 22`）、地下網總級數與 `warlordPact` 持續穩定度扣減，當 `s.PrcStab <= 12.0 && (subvDrain >= 5.0 || s.HasFlag("warlordPact"))` 時取消回穩拉力。
+  - `SimEngine.InferChoiceFaction`／`ApplyChoiceFactionShift`：補齊海空、情治、經貿關鍵字判定並於影響力 `>= 64`／`>= 76` 套用遞減係數。
+  - `SimEngine.AddUnit`／`NearestRocNode`：事件欲於 `"TW"` 編組陸軍部隊時，若本島已非國軍控制則改派至 `NearestRocNode(s, "TW")`（涵蓋仍受國軍控制之離島備援）。
+  - `BatchSim.cs` & `Program.cs`：新增 16 種結局對應策略（`EndingArchetypePolicies`：`end_full`～`end_bankrupt`）、`--policy endings` CLI 參數、`BatchSim.RunEndingCoverageSuite(1000u)` 與 `--test` 第 `5G` 項自動化覆蓋驗證（全程經由 `SimEngine.AdvanceDay` + `EventSystem.ResolveChoice` + 合法行動決策執行，無直接注入結局狀態）。
+- **最終驗證結果**：
+  - `dotnet build -c Release --no-restore`：0 警告、0 錯誤。
+  - `國光：反攻大陸.exe --sim 1 --policy endings --seed 1000`（`EXIT=0`，16/16 精準一對一達成）：
+    - `end_full -> full`（`1961`, `26` 省）、`end_collapse -> collapse`（`2026`, `10` 省）、`end_split_ussr -> split_ussr`（`2026`, `19` 省）、`end_armistice -> armistice`（`1981`, `22` 省）、`end_nanbei -> nanbei`（`2026`, `8` 省）、`end_beachhead -> beachhead`（`2026`, `1` 省）、`end_warlordP -> warlordP`（`2026`, `0` 省）、`end_warlordR -> warlordR`（`2026`, `3` 省）、`end_junta -> junta`（`2026`, `0` 省）、`end_mutiny -> mutiny`（`2026`, `0` 省）、`end_fortress -> fortress`（`2026`, `0` 省）、`end_status -> status`（`2026`, `0` 省）、`end_pianan -> pianan`（`2026`, `0` 省）、`end_invaded -> invaded`（`2026`, `0` 省）、`end_annexed -> annexed`（`2026`, `0` 省）、`end_bankrupt -> bankrupt`（`2026`, `0` 省）；全數 `ZeroSixMonthStreaks = 0`。
+  - `國光：反攻大陸.exe --test`：`TEST_EXIT=0`，`1 / 2 / 3 / 4 / 4B / 5 / 5B / 5C / 5D / 5E / 5F / 5G` 全數 `[PASS]`。
+  - `國光：反攻大陸.exe --sim 5 --policy all --seed 1000`（`SIM_ALL_EXIT=0`，20 局全數 `ZeroSixMonthStreaks = 0`）：`passive`（1× `status`、4× `junta`）、`econ`（5× `armistice` 1980–1981 含 15–22 省）、`rush1950`（5× `full` 1958–1993 含 26 省）、`opportunist`（3× `full` 2006–2026 含 20–26 省、2× `warlordR` 2026 含 21 省）。

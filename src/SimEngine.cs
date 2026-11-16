@@ -397,6 +397,11 @@ namespace RocGame
 
         public static Unit AddUnit(GameState s, string type, string loc, double str = 100.0)
         {
+            if (loc == "TW" && s.Control.TryGetValue("TW", out var twCtrl) && twCtrl != Faction.ROC
+                && GameData.UnitTypes.TryGetValue(type, out var ut) && ut.Domain == UnitDomain.Land)
+            {
+                loc = NearestRocNode(s, "TW");
+            }
             var u = new Unit { Id = s.NextUnitId++, Type = type, Loc = loc, Str = str };
             s.Units.Add(u);
             return u;
@@ -1006,11 +1011,11 @@ namespace RocGame
             if (c == null) return "army";
             if (!string.IsNullOrEmpty(c.FactionTag)) return c.FactionTag;
             string txt = $"{c.Label} {c.Hint}";
-            if (txt.Contains("艦") || txt.Contains("航空") || txt.Contains("戰機") || txt.Contains("飛彈") || txt.Contains("登陸") || txt.Contains("海域"))
+            if (txt.Contains("艦") || txt.Contains("海空") || txt.Contains("海軍") || txt.Contains("空軍") || txt.Contains("戰機") || txt.Contains("飛彈") || txt.Contains("登陸") || txt.Contains("海域") || txt.Contains("外島") || txt.Contains("防空") || txt.Contains("制海") || txt.Contains("離島"))
                 return "navair";
-            if (txt.Contains("情報") || txt.Contains("策反") || txt.Contains("特戰") || txt.Contains("起義") || txt.Contains("敵後") || txt.Contains("心戰") || txt.Contains("民兵"))
+            if (txt.Contains("情報") || txt.Contains("策反") || txt.Contains("特戰") || txt.Contains("起義") || txt.Contains("敵後") || txt.Contains("心戰") || txt.Contains("民兵") || txt.Contains("電台") || txt.Contains("諜") || txt.Contains("滲透") || txt.Contains("文化"))
                 return "intel";
-            if (txt.Contains("GDP") || txt.Contains("經濟") || txt.Contains("工業") || txt.Contains("科研") || txt.Contains("研發") || txt.Contains("外交") || txt.Contains("美援") || txt.Contains("國際"))
+            if (txt.Contains("GDP") || txt.Contains("經濟") || txt.Contains("工業") || txt.Contains("科研") || txt.Contains("研發") || txt.Contains("外交") || txt.Contains("美援") || txt.Contains("國際") || txt.Contains("國庫") || txt.Contains("財政") || txt.Contains("經貿") || txt.Contains("農耕") || txt.Contains("妥協") || txt.Contains("停火") || txt.Contains("撤退"))
                 return "econ";
             return "army";
         }
@@ -1023,7 +1028,17 @@ namespace RocGame
             foreach (var spec in StaffFactions)
             {
                 double cur = s.FactionInfluence.TryGetValue(spec.Key, out double v) ? v : 50.0;
-                double next = spec.Key == target ? cur + 6.0 : cur - 2.0;
+                double next;
+                if (spec.Key == target)
+                {
+                    double gain = cur >= 76.0 ? 2.5 : (cur >= 64.0 ? 4.0 : 6.0);
+                    next = cur + gain;
+                }
+                else
+                {
+                    double drop = cur <= 25.0 ? 0.8 : 1.5;
+                    next = cur - drop;
+                }
                 s.FactionInfluence[spec.Key] = Clamp(next, 0.0, 100.0);
             }
         }
@@ -2229,7 +2244,8 @@ namespace RocGame
             if (map.TryGetValue(id, out string isl) && s.Control[isl] == Faction.ROC) return isl;
             var held = HeldMainland(s);
             if (held.Count > 0) return held[0];
-            return "TW";
+            if (s.Control.GetValueOrDefault("TW") == Faction.ROC) return "TW";
+            return GameData.NodeIds.FirstOrDefault(x => GameData.Nodes[x].Kind == NodeKind.Island && s.Control.GetValueOrDefault(x) == Faction.ROC) ?? "TW";
         }
 
         public static (bool ok, string reason) ActionState(GameState s, ActionDef a, string target)
@@ -3482,9 +3498,11 @@ namespace RocGame
             s.Treasury += net * dt;
             if (s.Treasury < 0)
             {
-                s.Debt += -s.Treasury;
+                double shortfall = -s.Treasury;
+                s.Debt += shortfall;
                 s.Treasury = 0;
-                s.Morale -= 0.25;
+                if (shortfall > Math.Max(0.15, Income(s) * 0.04))
+                    s.Morale -= 0.15;
             }
             if (stepResearch)
             {
@@ -3493,6 +3511,8 @@ namespace RocGame
             double gNext = GameData.Interp(GameData.CurveRocGdp, s.Year + 1);
             double gCur = Math.Max(1.0, GameData.Interp(GameData.CurveRocGdp, s.Year));
             double gh = (gNext / gCur) - 1.0;
+            int sciCount = s.Techs.Count(t => GameData.Techs.TryGetValue(t, out var td) && td.Branch == "science");
+            double taxEcon = s.Tax == "high" ? 0.85 : (s.Tax == "low" ? 1.05 : 1.0);
             double mil = Upkeep(s) / Math.Max(0.01, Income(s));
             double burden = Clamp(1.0 - Math.Max(0.0, mil - 0.55) * 0.5, 0.55, 1.0);
             double moraleF = 0.8 + 0.4 * (s.Morale / 100.0);
@@ -3502,11 +3522,25 @@ namespace RocGame
                            : HasDirective(s, "dir_silicon_shield") ? 1.10
                            : HasDirective(s, "dir_asymmetric") ? 0.96 : 1.0;
             double facEcon = DominantStaffFaction(s) == "econ" ? 1.08 : 1.0;
-            double annualG = Math.Max(-0.5, gh * s.EconMult * burden * moraleF * (1.0 - war) * dirEcon * facEcon);
+            double annualG = Math.Max(-0.5, gh * s.EconMult * burden * moraleF * (1.0 - war) * dirEcon * facEcon * taxEcon);
+            if (sciCount == 0 && s.Year >= 1970 && !s.AutoActions.Contains("jp_trade") && s.Gdp > 1450.0) annualG *= 0.08;
+            if (s.Gdp > gNext * Math.Max(1.0, s.EconMult * 2.80)) annualG *= 0.15;
+            if (s.Debt > s.Gdp * 1.10) annualG = Math.Min(annualG, -0.02);
             s.Gdp *= Math.Pow(1.0 + annualG, dt);
             double dirMan = HasDirective(s, "dir_prep_counter") ? 1.30 : 1.0;
             s.Manpower += (1.4 + (s.Year - 1950) / 35.0 + HeldMainland(s).Count * 0.45) * dirMan * dt;
-            s.Morale += (56.0 - s.Morale) * 0.008 + (s.Debt > s.Gdp * 0.5 ? -0.20 : 0.0);
+            double taxMorale = s.Tax == "high" ? -0.65 : (s.Tax == "low" ? 0.15 : 0.0);
+            double debtMorale = s.Debt > s.Gdp * 0.95 ? -0.18 : 0.0;
+            bool hasJuntaMonopoly = s.FactionInfluence != null && s.FactionInfluence.Values.Any(v => v >= 80.0);
+            double juntaMorale = (hasJuntaMonopoly && s.Tax == "high") ? -0.45 : 0.0;
+            double supplyMorale = s.SupplyRatio < 0.65 ? -1.2 : 0.0;
+            s.Morale += (56.0 - s.Morale) * 0.008 + taxMorale + debtMorale + juntaMorale + supplyMorale;
+            if (s.Year >= 1972 && HeldMainland(s).Count == 0
+                && !HasDirective(s, "dir_allied_ring") && !HasDirective(s, "dir_cultural_wave")
+                && DominantStaffFaction(s) != "econ" && (s.AutoActions == null || !s.AutoActions.Contains("farm_team")))
+            {
+                s.Intl -= 1.5 * dt;
+            }
             if (s.UsAid > 0 && s.Year >= 1965) s.UsAid = Math.Max(0, s.UsAid - 0.05 * dt);
         }
 
@@ -3521,7 +3555,20 @@ namespace RocGame
             bool cult = s.Techs.Contains("cultural_psy");
             bool relief = s.Techs.Contains("mainland_relief");
             bool kinHorn = s.Techs.Contains("kinmen_horn");
-            s.PrcStab += ((target - s.PrcStab) * 0.22 - lostCount * 1.6 - (radio ? 0.45 : 0.0) - (cyber ? 0.35 : 0.0) - (cult ? 0.20 : 0.0)) * dt;
+            bool ug = s.Techs.Contains("underground");
+            bool usub = s.Techs.Contains("united_subvert");
+            var prcNodes = GameData.MainlandIds.Where(id => s.Control[id] == Faction.PRC).ToList();
+            double avgUnrest = prcNodes.Count > 0 ? prcNodes.Average(id => s.Unrest.GetValueOrDefault(id, 0.0)) : 0.0;
+            int ugTotal = prcNodes.Sum(id => s.UndergroundNet != null ? s.UndergroundNet.GetValueOrDefault(id, 0) : 0);
+            double subvDrain = (radio ? 1.1 : 0.0) + (cyber ? 0.9 : 0.0) + (cult ? 0.6 : 0.0)
+                             + (ug ? 1.4 : 0.0) + (usub ? 2.0 : 0.0)
+                             + (ug && avgUnrest > 22.0 ? (avgUnrest - 22.0) * 0.22 : 0.0)
+                             + ((ug || usub) ? ugTotal * 0.12 : 0.0)
+                             + (s.HasFlag("warlordPact") ? 9.0 : 0.0);
+            double pull = (s.PrcStab <= 12.0 && (subvDrain >= 5.0 || s.HasFlag("warlordPact")))
+                ? 0.0
+                : (target - s.PrcStab) * 0.20;
+            s.PrcStab += (pull - lostCount * 1.6 - subvDrain) * dt;
             if (s.PrcDoctrine == "internal_purge")
                 s.PrcStab += 0.35 * dt * 12.0;
             s.PrcGdpMod += (1.0 - s.PrcGdpMod) * 0.06 * dt;
@@ -3560,12 +3607,12 @@ namespace RocGame
 
             if (tickAnnualCounters)
             {
-                if (held.Count >= 2 && s.Morale < 25 && s.SupplyRatio < 0.7)
+                if (held.Count >= 2 && (s.Morale < 28 || s.SupplyRatio < 0.72))
                     s.Flags["warlordRisk"] = s.GetFlag("warlordRisk") + 1;
-                else
+                else if (held.Count == 0 && s.Morale >= 65 && s.SupplyRatio >= 0.95)
                     s.Flags["warlordRisk"] = 0;
 
-                if (s.PrcStab <= 0)
+                if (s.PrcStab <= 0 || (s.HasFlag("warlordPact") && s.PrcStab <= 10))
                     s.Flags["prcZeroTurns"] = s.GetFlag("prcZeroTurns") + 1;
                 else
                     s.Flags["prcZeroTurns"] = 0;
@@ -3601,14 +3648,14 @@ namespace RocGame
                     return;
                 }
                 if (s.Morale <= 0) { Finish(s, "mutiny"); return; }
+                if (s.GetFlag("warlordRisk") >= 3 && held.Count >= 2) { Finish(s, "warlordR"); return; }
                 if (s.FactionInfluence != null && s.FactionInfluence.Values.Any(v => v >= 80.0) && s.Morale < 40.0)
                 {
                     Finish(s, "junta");
                     return;
                 }
-                if (s.GetFlag("warlordRisk") >= 3 && held.Count >= 2) { Finish(s, "warlordR"); return; }
                 double rocLand = LandStr(s.Units);
-                if (s.PrcStab <= 0 && s.GetFlag("prcZeroTurns") >= 2 && (held.Count < 4 || rocLand < 15))
+                if ((s.PrcStab <= 0 || s.HasFlag("warlordPact")) && s.GetFlag("prcZeroTurns") >= 2 && (held.Count < 4 || rocLand < 15))
                 {
                     Finish(s, "warlordP");
                     return;
@@ -3622,7 +3669,10 @@ namespace RocGame
                 if (held.Count >= 5 && hasMajor) { Finish(s, "nanbei"); return; }
                 if (held.Count >= 1) { Finish(s, "beachhead"); return; }
                 if (!s.HasFlag("lostAnyIsland") && s.Control["TW"] == Faction.ROC
-                    && GameData.NodeIds.Where(id => GameData.Nodes[id].Kind == NodeKind.Island).All(id => s.Control.GetValueOrDefault(id) == Faction.ROC))
+                    && new[] { "TW", "PH", "KM", "MZ" }.All(id => s.Control.GetValueOrDefault(id) == Faction.ROC)
+                    && (s.Control.GetValueOrDefault("ZS") == Faction.ROC
+                        || s.Control.GetValueOrDefault("DC") == Faction.ROC
+                        || (s.Fortification.GetValueOrDefault("KM", 0) >= 2 && s.Fortification.GetValueOrDefault("MZ", 0) >= 2)))
                 {
                     Finish(s, "fortress");
                     return;

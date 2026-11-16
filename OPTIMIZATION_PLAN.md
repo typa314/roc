@@ -1,6 +1,6 @@
 # 《國光：反攻大陸》整體優化與自創內容計畫（v1 · 2026-11-16）
 
-> 狀態：**P0–P5 全部實作與自動化測試／平衡驗收完成**。詳細程式碼與實測數據見下方第 6 節與 [SESSION.md](file:///c:/Users/typa3/agent_tmp/roc/SESSION.md)。
+> 狀態：**P0–P5 實作與全數 16 種結局 1950–2025 模擬覆蓋驗證（`test 5G`）全部完成**。詳細程式碼與實測數據見下方第 6 節與 [SESSION.md](file:///c:/Users/typa3/agent_tmp/roc/SESSION.md)。
 
 ---
 
@@ -211,13 +211,15 @@ flowchart TD
 
 ---
 
-## 6. 完工實測摘要（P0–P5 已驗證）
+## 6. 完工實測摘要（P0–P5 ＋ 16/16 結局模擬驗證）
 
 - **建置**：`dotnet build -c Release --no-restore`（0 警告、0 錯誤）。
-- **自動化測試（`--test`）**：ExitCode 0，`1 / 2 / 3 / 4 / 4B / 5 / 5B / 5C / 5D / 5E / 5F` 全數 `[PASS]`，無殘留 HTML 與非 BMP 字元。
-- **無 UI 批次模擬（`--sim 5 --policy all --seed 1000`，共 20 局）**：
+- **自動化測試（`--test`）**：ExitCode 0，`1 / 2 / 3 / 4 / 4B / 5 / 5B / 5C / 5D / 5E / 5F / 5G` 全數 `[PASS]`，無殘留 HTML 與非 BMP 字元。
+- **全 16 種結局無 UI 實跑模擬（`--sim 1 --policy endings --seed 1000`，共 16 局，無狀態注入）**：
+  - `end_full -> full`（1961，26 省）、`end_collapse -> collapse`（2026，10 省）、`end_split_ussr -> split_ussr`（2026，19 省）、`end_armistice -> armistice`（1981，22 省）、`end_nanbei -> nanbei`（2026，8 省）、`end_beachhead -> beachhead`（2026，1 省）、`end_warlordP -> warlordP`（2026，0 省）、`end_warlordR -> warlordR`（2026，3 省）、`end_junta -> junta`（2026，0 省）、`end_mutiny -> mutiny`（2026，0 省）、`end_fortress -> fortress`（2026，0 省）、`end_status -> status`（2026，0 省）、`end_pianan -> pianan`（2026，0 省）、`end_invaded -> invaded`（2026，0 省）、`end_annexed -> annexed`（2026，0 省）、`end_bankrupt -> bankrupt`（2026，0 省）；**16/16 全數精準達成**且全部 `ZeroSixMonthStreaks = 0`。
+- **基準 4 策略批次模擬（`--sim 5 --policy all --seed 1000`，共 20 局）**：
   - `ZeroSixMonthStreaks = 0`（全數 20 局未出現連續 6 個月零決策空窗）。
-  - `passive`（5 局）：3× `status`、2× `beachhead`（無免費白撿崩盤與無 `full`）。
-  - `econ`（5 局）：3× 1980–1981 `armistice`、1× 2026 `armistice`、1× 1999 `full`。
-  - `rush1950`（5 局）：因對岸 2 省緊急總動員與 3 省低門檻反撲機制，全收復年份由調整前 `1952–1955` 拉長至 `1959–2001`。
-  - `opportunist`（5 局）：全數進入 2026 `split_ussr`（光復 17–25 省並面臨北疆蘇聯牽制）。
+  - `passive`（5 局）：1× `status`、4× `junta`。
+  - `econ`（5 局）：5× 1980–1981 `armistice`（光復 15–22 省）。
+  - `rush1950`（5 局）：5× `full`（1958–1993）。
+  - `opportunist`（5 局）：3× `full`（2006–2026，20–26 省）、2× `warlordR`（2026，21 省）。

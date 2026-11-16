@@ -95,7 +95,7 @@
 | **4. 軍閥割據** | `warlordR` | **將在外君命有所不受・藩鎮之禍** | 2025 年終戰結算時國軍保有 ≥ 2 省但長期低民心斷補累積割據危機（`warlordRisk ≥ 3`） |
 | **4. 軍閥割據** | `junta` | **軍閥割據・強人軍政** | 2025 年終戰結算時單一參謀派系影響力 ≥ 80 且民心士氣 < 40，憲政體制讓位於軍人執政 |
 | **4. 軍閥割據** | `mutiny` | **民心潰散・前線兵變** | 2025 年終戰結算時台灣民心士氣跌至 0，引發前線譁變與中樞動搖 |
-| **5. 維持現狀** | `fortress` | **維持現狀・金馬鐵壁** | 2025 年終戰結算時大陸 0 省但本島與全部離島（含海南、舟山、大陳、金門、馬祖、澎湖）七十五年寸土未失 |
+| **5. 維持現狀** | `fortress` | **維持現狀・金馬鐵壁** | 2025 年終戰結算時大陸 0 省但台澎金馬七十五年寸土未失（未因交戰失守離島），且保有舟山／大陳或金馬雙要塞工事 Lv.2 以上 |
 | **5. 維持現狀** | `status` | **台灣奇蹟・隔海對峙** | 2025 年終戰結算時未收復大陸，但台灣 GDP > 1800 億且國際地位 > 40，開創科技與經濟奇蹟 |
 | **5. 維持現狀** | `pianan` | **孤島風雨・偏安一隅** | 2025 年終戰結算時守住台灣本島，但經濟與外交陷入孤立 |
 | **6. 反被併吞** | `invaded` | **渡海風暴・武力統一** | 遊戲中我方全境失守或本島失守且已無大陸據點與存活國軍（被全滅）立即觸發，或 2025 年終戰本島失守且無大陸據點 |
@@ -122,12 +122,12 @@ c:\Users\typa3\agent_tmp\roc\
     ├── EventSystem.cs      # 歷史事件（1950–1996）、時代國策、Major 省分治理方針、派系影響力結算與開局劇本
     ├── EventSystem.Dynamic.cs # 7 大類加權動態事件池、S3/S4 暴露與戰機事件、派系反彈、地下網 Lv.3 成熟與膠著調停
     ├── EventSystem.Late.cs # 1973–2024 後期歷史＋近代三選一事件與比例縮放（ChipHeld / ShockPrc）
-    ├── BatchSim.cs         # 無 UI 批次策略模擬器（passive / econ / rush1950 / opportunist）與決定性 CSV/摘要輸出
+    ├── BatchSim.cs         # 無 UI 批次策略模擬器（passive/econ/rush1950/opportunist 與 16 結局 --policy endings 驗證）與決定性 CSV 輸出
     ├── WarUiControls.cs    # 二戰復古兵棋圖桌自繪元件庫（WarPalette / WarButton / WarRoomPanel / DarkScrollContainer）
     ├── MainForm.cs         # 主視窗、地圖繪製、左鍵拖曳即時調防、滾輪縮放、HUD、主選單變數與建軍/戰報抽屜
     ├── MainForm.Tech.cs    # 五大分支 63 項工程藍圖科技樹專頁（partial class）
     ├── MainForm.Overlays.cs# 全版面軍情處專頁、事件卡視窗、雙欄終局結算＋回憶錄顯示（partial class）
-    └── Program.cs          # 程式入口、--test 自動化驗證（1..5F）與 --sim CLI 進入點
+    └── Program.cs          # 程式入口、--test 自動化驗證（1..5G）與 --sim CLI 進入點
 ```
 
 ### 啟動、模擬與測試指令
@@ -143,6 +143,7 @@ c:\Users\typa3\agent_tmp\roc\
 - **無 UI 批次策略模擬（`--sim`）**：
   ```powershell
   .\bin\Release\net8.0-windows\國光：反攻大陸.exe --sim 10 --policy all --seed 1000 --out sim.csv
+  .\bin\Release\net8.0-windows\國光：反攻大陸.exe --sim 1 --policy endings --seed 1000 --out sim_endings.csv
   ```
 
 ---

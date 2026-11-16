@@ -117,10 +117,11 @@ namespace RocGame
                 }
             }
 
-            // 1) 🐻 俄國/蘇聯趁機侵占北疆事件（嚴冬機率減半）
+            // 1) 🐻 俄國/蘇聯趁機侵占北疆事件（嚴冬機率減半；過度聯繫莫斯科顯著升高干預機率；1991 後僅於聯繫莫斯科或逼近北京時觸發俄羅斯干預）
             var availBorder = GameData.BorderUssrIds.Where(id => s.Control[id] == Faction.PRC).ToList();
-            double rusInvChance = (s.Month is 12 or 1 or 2) ? 0.07 : 0.14;
-            if (availBorder.Count > 0 && (s.PrcStab < 46 || held.Count >= 2 || s.SovRel >= 24) && SimEngine.Chance(s, rusInvChance) && CooldownOk(s, "russian_inv", 18))
+            double rusInvChance = ((s.Month is 12 or 1 or 2) ? 0.07 : 0.14) + (s.SovRel >= 24 ? 0.22 : 0.0);
+            bool rusPostUssrCond = !s.HasFlag("ussrGone") || s.SovRel >= 24 || s.Control.GetValueOrDefault("HE") == Faction.ROC;
+            if (rusPostUssrCond && availBorder.Count > 0 && (s.PrcStab < 46 || held.Count >= 2 || s.SovRel >= 24) && SimEngine.Chance(s, rusInvChance) && CooldownOk(s, "russian_inv", 18))
             {
                 string targetId = availBorder[(int)(SimEngine.Rng(s) * availBorder.Count)];
                 string tName = GameData.Nodes[targetId].Name;
@@ -343,7 +344,7 @@ namespace RocGame
             }
 
             // 6) 大陸軍區割據危機（僅作戰局情勢與戰術應對，絕不在遊戲途中提早結束達成軍閥結局）
-            if (ctx.PrcNodes.Count > 0 && s.PrcStab <= 25 && !s.HasFlag("warlordEventFired") && SimEngine.Chance(s, 0.30))
+            if (ctx.PrcNodes.Count > 0 && s.PrcStab <= 28 && !s.HasFlag("warlordEventFired") && SimEngine.Chance(s, 0.45))
             {
                 s.Flags["warlordEventFired"] = 1;
                 string fwdRoc = ctx.PickForwardRocNode(s);
@@ -359,7 +360,8 @@ namespace RocGame
                             Hint = "中共穩定 -8、敵方前線與內地共軍守軍 -25%、我方補給 +6；但戰後地方割據風險升高（若終戰兵力不足將有割據之虞）",
                             Effect = st => {
                                 st.PrcStab -= 8; st.Supply += 6;
-                                st.Flags["prcZeroTurns"] = Math.Max(st.GetFlag("prcZeroTurns"), 1);
+                                st.Flags["warlordPact"] = 1;
+                                st.Flags["prcZeroTurns"] = Math.Max(st.GetFlag("prcZeroTurns"), 2);
                                 foreach (var id in GameData.MainlandIds) if (st.Control[id] == Faction.PRC) st.Garrison[id] = Math.Max(0.5, st.Garrison[id] * 0.75);
                                 SimEngine.Log(st, "各地軍區派系彼此掣肘、消極避戰，共軍防線大面積鬆動！", "good");
                             }
@@ -416,7 +418,9 @@ namespace RocGame
             }
 
             // 8) 北京最後通牒（僅作外交立場紀錄，不於遊戲途中直接結束）
-            if (s.Year >= 1988 && held.Count == 0 && ctx.PrcNodes.Count >= 6 && SimEngine.ThreatIndex(s) > 1.8 && s.Intl < 40 && !s.HasFlag("ultimatumFired") && SimEngine.Chance(s, 0.28))
+            if (s.Year >= 1988 && held.Count == 0 && ctx.PrcNodes.Count >= 6
+                && (SimEngine.ThreatIndex(s) > 1.25 || SimEngine.PrcMilIndex(s) > SimEngine.RocMilIndex(s) * 2.0)
+                && s.Intl < 48 && !s.HasFlag("ultimatumFired") && SimEngine.Chance(s, 0.45))
             {
                 s.Flags["ultimatumFired"] = 1;
                 s.PendingEvents.Add(new GameEvent
