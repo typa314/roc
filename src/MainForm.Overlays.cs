@@ -348,9 +348,10 @@ namespace RocGame
 
                 int unrestCnt = State.Unrest?.Values.Count(v => v > 0) ?? 0;
                 _intelKpiTitles[1].Text = $"大陸內部：穩定 {State.PrcStab:F0}% · 動盪 {unrestCnt} 省";
-                _intelKpiBodies[1].Text = State.HasFlag("subv_hk")
+                _intelKpiBodies[1].Text = (State.HasFlag("subv_hk")
                     ? "港澳地下情報網與華南交通線運作中"
-                    : "敵後無線電網尚在建置，持續接收零星線報";
+                    : "敵後無線電網尚在建置，持續接收零星線報")
+                    + "\n" + SimEngine.DescribePrcDoctrineIntel(State);
 
                 int ussrCnt = SimEngine.UssrNodes(State).Count;
                 _intelKpiTitles[2].Text = $"北疆俄情：緊張 {State.PrcSovTension * 100:F0}% · 俄占 {ussrCnt} 省";
@@ -1025,12 +1026,47 @@ namespace RocGame
             string summaryText = over.Text + "\n\n" +
                        $"• 光復大陸省分：{SimEngine.HeldMainland(State).Count} / {GameData.MainlandIds.Length} 省\n" +
                        $"• 北疆俄占省分：{SimEngine.UssrNodes(State).Count} 省\n" +
-                       $"• 台灣 GDP：${State.Gdp:F0} 億美元  |  累計勝仗：{State.BattlesWon} 場\n" +
+                       $"• 台灣 GDP：${State.Gdp:F0} 億  |  累計勝仗：{State.BattlesWon} 場\n" +
                        $"• 國軍總折損：{State.RocLoss:F1} 師  |  敵軍總折損：{State.EnemyLoss:F1} 師";
-            var summaryFont = new Font("Microsoft JhengHei UI", 10.2f);
+
+            var memLines = new List<string> { "◈ 統帥回憶錄 · 關鍵決策軌跡" };
+            var topMem = (State.Memoir ?? new List<MemoirEntry>())
+                .OrderByDescending(m => m.Weight)
+                .ThenBy(m => m.Date ?? "", StringComparer.Ordinal)
+                .Take(8)
+                .OrderBy(m => m.Date ?? "", StringComparer.Ordinal)
+                .ThenBy(m => m.Title ?? "")
+                .ToList();
+            if (topMem.Count == 0)
+                memLines.Add("• 本局未留特別戰略決策紀錄。");
+            else
+                foreach (var me in topMem)
+                {
+                    string ym = !string.IsNullOrEmpty(me.Date) && me.Date.Length >= 7 ? me.Date.Substring(0, 7) : (me.Date ?? "");
+                    memLines.Add($"• {ym} {me.Title}");
+                }
+            string domKey = SimEngine.DominantStaffFaction(State);
+            if (!string.IsNullOrEmpty(domKey))
+            {
+                var spec = SimEngine.StaffFactions.FirstOrDefault(sp => sp.Key == domKey);
+                memLines.Add($"★ 主導派系：【{spec.Name}】{spec.Chief}（{spec.BonusDesc}）");
+            }
+            else
+            {
+                memLines.Add("★ 中樞評述：參謀四派制衡並存，軍政權力保持均衡。");
+            }
+            string memoirText = string.Join("\n", memLines);
+
+            int leftW = (int)(w * 0.48);
+            int rightW = Math.Max(180, w - leftW - 12);
+            var summaryFont = new Font("Microsoft JhengHei UI", 9.6f);
+            var memFont = new Font("Microsoft JhengHei UI", 8.4f);
             var summarySize = TextRenderer.MeasureText(summaryText, summaryFont,
-                new Size(Math.Max(120, w - 24), 320), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
-            int summaryHeight = Math.Clamp(summarySize.Height + 24, 144, 190);
+                new Size(Math.Max(120, leftW - 22), 300), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+            var memSize = TextRenderer.MeasureText(memoirText, memFont,
+                new Size(Math.Max(120, rightW - 20), 300), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+            int rowH = Math.Clamp(Math.Max(summarySize.Height + 20, memSize.Height + 20), 148, 184);
+
             var lblText = new Label
             {
                 Text = summaryText,
@@ -1038,12 +1074,22 @@ namespace RocGame
                 BackColor = BgCard,
                 Font = summaryFont,
                 Location = new Point(20, y),
-                Size = new Size(w, summaryHeight),
-                Padding = new Padding(12)
+                Size = new Size(leftW, rowH),
+                Padding = new Padding(10)
             };
-            y += summaryHeight + 18;
+            var lblMemoir = new Label
+            {
+                Text = memoirText,
+                ForeColor = TextMain,
+                BackColor = BgCard,
+                Font = memFont,
+                Location = new Point(20 + leftW + 12, y),
+                Size = new Size(rightW, rowH),
+                Padding = new Padding(10)
+            };
+            y += rowH + 14;
 
-            int chartHeight = Math.Clamp(_mapPanel.Height - 420, 160, 230);
+            int chartHeight = Math.Clamp(_mapPanel.Height - 445, 145, 190);
             var historyCharts = new BufferedPanel
             {
                 Location = new Point(20, y),
@@ -1061,15 +1107,15 @@ namespace RocGame
                     "兩岸綜合軍力指數對比",
                     State.History.Select(h => (h.Year, h.RocMil, h.PrcMil)).ToList());
             };
-            y += chartHeight + 16;
+            y += chartHeight + 14;
 
-            var btnRestart = CreateWarButton("重新展開新局（返回主選單）", Color.FromArgb(148, 102, 34), TextMain, 260, 44, GoldCol);
+            var btnRestart = CreateWarButton("重新展開新局（返回主選單）", Color.FromArgb(148, 102, 34), TextMain, 260, 42, GoldCol);
             btnRestart.Font = new Font("Microsoft JhengHei UI", 10.5f, FontStyle.Bold);
             btnRestart.Location = new Point(Math.Max(20, (_eventOverlay.Width - 260) / 2), y);
             btnRestart.Click += (_, _) => { _showTitle = true; UpdateOverlays(); SyncSimTimer(); };
 
-            _eventOverlay.Controls.AddRange(new Control[] { lblGroup, lblTitle, lblText, historyCharts, btnRestart });
-            _eventOverlay.Height = Math.Min(Math.Max(520, btnRestart.Bottom + 20), Math.Max(520, _mapPanel.Height - 24));
+            _eventOverlay.Controls.AddRange(new Control[] { lblGroup, lblTitle, lblText, lblMemoir, historyCharts, btnRestart });
+            _eventOverlay.Height = Math.Min(Math.Max(500, btnRestart.Bottom + 18), Math.Max(500, _mapPanel.Height - 24));
             _eventOverlay.Location = new Point((_mapPanel.Width - _eventOverlay.Width) / 2, (_mapPanel.Height - _eventOverlay.Height) / 2);
             _eventOverlay.ResumeLayout();
         }

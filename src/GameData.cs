@@ -85,6 +85,14 @@ namespace RocGame
         public string Text;
     }
 
+    public class MutatorDef
+    {
+        public string Id;
+        public string Title;
+        public string Desc;
+        public double ScoreBonus;
+    }
+
     public static class GameData
     {
         public const string GameTitle = "國光：反攻大陸";
@@ -238,6 +246,7 @@ namespace RocGame
         public static readonly List<TechDef> TechList;
         public static readonly Dictionary<string, TechDef> Techs;
         public static readonly Dictionary<string, EndingDef> Endings;
+        public static readonly Dictionary<string, MutatorDef> Mutators;
 
         static PointF[] P(params float[] coords)
         {
@@ -433,9 +442,43 @@ namespace RocGame
                 ["mutiny"]     = new EndingDef { Key = "mutiny", Kind = "chaos", Group = "軍閥割據", Title = "軍閥割據・兵變", Text = "民心潰散，軍中發生兵變，各軍頭擁兵割據，國府體制瓦解。" },
                 ["status"]     = new EndingDef { Key = "status", Kind = "draw", Group = "維持現狀", Title = "維持現狀・台灣奇蹟", Text = "反攻未竟，但台灣成為繁榮的科技經濟體。歷史將以另一種方式評價這一切。" },
                 ["pianan"]     = new EndingDef { Key = "pianan", Kind = "lose", Group = "維持現狀", Title = "維持現狀・偏安一隅", Text = "反攻大陸終成口號，對岸國力已遙遙領先，台灣前途未卜。" },
+                ["junta"]      = new EndingDef { Key = "junta", Kind = "chaos", Group = "軍閥割據", Title = "軍閥割據・強人軍政", Text = "單一軍政派系膨脹至極致且民心疲憊，憲政讓位於軍人執政，內部危機四伏。" },
+                ["fortress"]   = new EndingDef { Key = "fortress", Kind = "draw", Group = "維持現狀", Title = "維持現狀・金馬鐵壁", Text = "台澎金馬七十五年寸土未失、外島構築為鋼鐵前哨，隔海維持高張力對峙均勢。" },
                 ["bankrupt"]   = new EndingDef { Key = "bankrupt", Kind = "lose", Group = "反被併吞", Title = "反被併吞・財政崩潰", Text = "軍費無以為繼，惡性通膨重演，國府失去統治能力，北京趁勢接收。" },
                 ["invaded"]    = new EndingDef { Key = "invaded", Kind = "lose", Group = "反被併吞", Title = "反被併吞・武力統一", Text = "解放軍登陸台灣本島，中華民國政府流亡海外。反攻大業徹底失敗。" },
                 ["annexed"]    = new EndingDef { Key = "annexed", Kind = "lose", Group = "反被併吞", Title = "反被併吞・城下之盟", Text = "在國際孤立與軍事壓力下，台北被迫接受北京條件，中華民國走入歷史。" },
+            };
+
+            Mutators = new Dictionary<string, MutatorDef>
+            {
+                ["mut_aid_delayed"] = new MutatorDef
+                {
+                    Id = "mut_aid_delayed",
+                    Title = "美援遲滯",
+                    Desc = "1955年前華府協防與經援減半、初始外援與國際聲望下調",
+                    ScoreBonus = 0.15,
+                },
+                ["mut_ussr_early"] = new MutatorDef
+                {
+                    Id = "mut_ussr_early",
+                    Title = "北疆鷹派",
+                    Desc = "1955年起蘇聯邊境警戒常態升溫、華北／東北出兵傾向提高",
+                    ScoreBonus = 0.15,
+                },
+                ["mut_storm_decade"] = new MutatorDef
+                {
+                    Id = "mut_storm_decade",
+                    Title = "狂濤年代",
+                    Desc = "1950–1965年台海與東海風浪加劇，兩棲整備與跨海損耗升高",
+                    ScoreBonus = 0.10,
+                },
+                ["mut_prc_harvest"] = new MutatorDef
+                {
+                    Id = "mut_prc_harvest",
+                    Title = "大躍順風",
+                    Desc = "1950年代初期大陸政權穩定基準提高、動員韌性更強",
+                    ScoreBonus = 0.20,
+                },
             };
         }
     }

@@ -272,6 +272,23 @@ namespace RocGame
         // 統帥回憶錄 (I)
         public List<MemoirEntry> Memoir { get; set; } = new();
 
+        // 作戰計畫與欺敵 (E)
+        public string ActiveOpPlanKind { get; set; } = "";
+        public string ActiveOpTargetId { get; set; } = "";
+        public string ActiveOpFeintZone { get; set; } = "";
+        public string ActiveOpCodeName { get; set; } = "";
+
+        // 敵後滲透網路 (F)
+        public Dictionary<string, int> UndergroundNet { get; set; } = new();
+        public Dictionary<string, double> UndergroundProg { get; set; } = new();
+
+        // 對手戰略學說 (G)
+        public string PrcDoctrine { get; set; } = "coastal_wall";
+        public string NextPrcDoctrine { get; set; } = "inland_lure";
+
+        // 雙重世界線／自選變數 (H)
+        public List<string> ActiveMutators { get; set; } = new();
+
         public int GetFlag(string k) => Flags.TryGetValue(k, out int v) ? v : 0;
         public bool HasFlag(string k) => GetFlag(k) > 0;
     }
@@ -312,7 +329,7 @@ namespace RocGame
             if (s.Logs.Count > 250) s.Logs.RemoveAt(s.Logs.Count - 1);
         }
 
-        public static GameState NewGame(uint? seed = null, bool easyMode = false)
+        public static GameState NewGame(uint? seed = null, bool easyMode = false, IEnumerable<string> mutators = null)
         {
             var s = new GameState { Seed = seed ?? (uint)Environment.TickCount, EasyMode = easyMode };
             foreach (var id in GameData.NodeIds)
@@ -322,6 +339,11 @@ namespace RocGame
                 s.Garrison[id] = n.BaseGarrison;
                 s.Fortification[id] = n.Fort;
                 s.Unrest[id] = n.Kind == NodeKind.Mainland ? 10.0 : 0.0;
+                if (n.Kind == NodeKind.Mainland)
+                {
+                    s.UndergroundNet[id] = (id is "FJ" or "GD" or "ZJ" or "JS") ? 1 : 0;
+                    s.UndergroundProg[id] = 0.0;
+                }
             }
 
             void Add(string t, string loc, int count, double str = 100.0)
@@ -337,6 +359,32 @@ namespace RocGame
             Add("air", "Z3", 1, 78.0);   Add("air", "Z2", 1, 75.0);   Add("air", "TW", 1, 75.0);
             Add("amph", "TW", 2, 85.0);
             s.Flags["hiQiongya"] = 1;
+
+            if (mutators != null)
+            {
+                foreach (var mid in mutators.Where(m => !string.IsNullOrEmpty(m) && GameData.Mutators.ContainsKey(m)).Distinct().Take(2))
+                    s.ActiveMutators.Add(mid);
+                if (s.ActiveMutators.Count > 0)
+                {
+                    if (s.ActiveMutators.Contains("mut_aid_delayed"))
+                    {
+                        s.UsRel = Math.Max(0.0, s.UsRel - 12.0);
+                        s.UsAid *= 0.5;
+                        s.Intl = Math.Max(0.0, s.Intl - 6.0);
+                    }
+                    if (s.ActiveMutators.Contains("mut_ussr_early"))
+                        s.PrcSovTension = Math.Max(0.35, s.PrcSovTension);
+                    if (s.ActiveMutators.Contains("mut_prc_harvest"))
+                    {
+                        s.PrcStab = Math.Min(95.0, s.PrcStab + 12.0);
+                        foreach (var mid in GameData.MainlandIds)
+                            s.Garrison[mid] *= 1.12;
+                    }
+                    string mNames = string.Join("、", s.ActiveMutators.Select(m => GameData.Mutators[m].Title));
+                    Log(s, $"◈ 本局啟用戰局變數：{mNames}。", "info");
+                    AddMemoir(s, "開局定調", $"啟用變數：{mNames}", $"於 1950 年初設定戰局變數【{mNames}】，考驗應變之策。", 2);
+                }
+            }
 
             RollFog(s);
             AssessPosture(s);
@@ -453,14 +501,16 @@ namespace RocGame
         public static double PrcSea(GameState s, string z)
         {
             double baseNavy = GameData.Interp(GameData.CurvePrcNavy, s.Year) * GameData.Zones[z].PrcWeight;
-            return baseNavy * (1.0 + 0.3 * (PrcTech(s, GameData.CurvePrcNavyTech) - 1.0)) * PrcStabFactor(s) * (1.0 - 0.5 * PrcLostIndustry(s));
+            double docMult = (s.PrcDoctrine == "strait_gamble" && (z == "Z2" || z == "Z3")) ? 1.12 : 1.0;
+            return baseNavy * (1.0 + 0.3 * (PrcTech(s, GameData.CurvePrcNavyTech) - 1.0)) * PrcStabFactor(s) * (1.0 - 0.5 * PrcLostIndustry(s)) * docMult;
         }
 
         public static double PrcAir(GameState s, string z)
         {
             double share = GameData.Zones[z].PrcWeight * (1.0 - 0.4 * s.PrcSovTension);
             double baseAir = GameData.Interp(GameData.CurvePrcAir, s.Year) * share;
-            return baseAir * (1.0 + 0.3 * (PrcTech(s, GameData.CurvePrcAirTech) - 1.0)) * PrcStabFactor(s) * (1.0 - 0.5 * PrcLostIndustry(s));
+            double docMult = (s.PrcDoctrine == "strait_gamble" && (z == "Z2" || z == "Z3")) ? 1.12 : 1.0;
+            return baseAir * (1.0 + 0.3 * (PrcTech(s, GameData.CurvePrcAirTech) - 1.0)) * PrcStabFactor(s) * (1.0 - 0.5 * PrcLostIndustry(s)) * docMult;
         }
 
         public static double RocSea(GameState s, string z)
@@ -503,7 +553,10 @@ namespace RocGame
         public static double UsDefense(GameState s)
         {
             if (s.Year < 1951) return 0.0;
-            return s.UsProtect ? 20.0 + (s.UsRel + s.UsDefBonus) * 0.6 : Math.Max(0.0, s.UsRel + s.UsDefBonus - 55.0) * 0.5;
+            double def = s.UsProtect ? 20.0 + (s.UsRel + s.UsDefBonus) * 0.6 : Math.Max(0.0, s.UsRel + s.UsDefBonus - 55.0) * 0.5;
+            if (s.ActiveMutators != null && s.ActiveMutators.Contains("mut_aid_delayed") && s.Year < 1955)
+                def *= 0.5;
+            return def;
         }
 
         public static double RocMilIndex(GameState s)
@@ -776,6 +829,7 @@ namespace RocGame
         public static bool HasIntel(GameState s, string id)
         {
             if (s.Control[id] == Faction.ROC || LandStr(UnitsAt(s, id, UnitDomain.Land)) > 0) return true;
+            if (s.HasFlag("ugIntel_" + id)) return true;
             if ((s.Techs.Contains("sat_elint") || s.Techs.Contains("formosat_recon")) && GameData.Nodes[id].Kind == NodeKind.Mainland) return true;
             if (s.Techs.Contains("hkmacau_net") && (id == "GD" || id == "GX" || id == "JS" || id == "FJ" || id == "ZJ")) return true;
             if (s.Techs.Contains("se_asia_listen") && (id == "SC" || id == "GZ" || id == "YN" || id == "GX")) return true;
@@ -885,6 +939,43 @@ namespace RocGame
             s.ActiveDirectiveName = "";
         }
 
+        public static readonly (string Key, string Title, string EffectDesc)[] PrcDoctrines =
+        {
+            ("coastal_wall",   "東南岸防重兵", "東南沿岸守軍 +15%、內陸預備隊 -10%，嚴防我軍搶灘"),
+            ("inland_lure",    "誘敵深入反擊", "沿海防線略收縮（-10%），但鄰近我軍控制區的內陸重兵反撲門檻大幅降低"),
+            ("strait_gamble",  "台海冒進搶奪", "東海／台海海空活躍度 +12%，對離島發動突襲之傾向大增"),
+            ("internal_purge", "整風穩政優先", "大陸政治穩定度額外回升、動員補兵降 10%，各省暗流不滿滋長")
+        };
+
+        public static string GetPrcDoctrineTitle(string key)
+        {
+            foreach (var d in PrcDoctrines) if (d.Key == key) return d.Title;
+            return "東南岸防重兵";
+        }
+
+        public static string DescribePrcDoctrineIntel(GameState s)
+        {
+            if (s == null) return "";
+            string actual = string.IsNullOrEmpty(s.PrcDoctrine) ? "coastal_wall" : s.PrcDoctrine;
+            var info = PrcDoctrines.FirstOrDefault(d => d.Key == actual);
+            bool exact = s.EasyMode
+                      || s.Techs.Contains("black_cat")
+                      || s.Techs.Contains("sat_elint")
+                      || s.Techs.Contains("formosat_recon")
+                      || DominantStaffFaction(s) == "intel";
+            if (exact)
+                return $"對岸戰略動向（確報）：【{info.Title}】— {info.EffectDesc}";
+
+            string alt = string.IsNullOrEmpty(s.NextPrcDoctrine) || s.NextPrcDoctrine == actual
+                ? PrcDoctrines.First(d => d.Key != actual).Key
+                : s.NextPrcDoctrine;
+            string altTitle = GetPrcDoctrineTitle(alt);
+            int order = ((s.Year + s.Turn) & 1) == 0 ? 0 : 1;
+            string first = order == 0 ? info.Title : altTitle;
+            string second = order == 0 ? altTitle : info.Title;
+            return $"對岸戰略研判（概估）：可能採取【{first}】或【{second}】";
+        }
+
         public static readonly (string Key, string Name, string Chief, string BonusDesc)[] StaffFactions =
         {
             ("army",   "陸軍派", "參謀次長 雷振山 上將", "地面部隊攻防 +6%"),
@@ -963,6 +1054,18 @@ namespace RocGame
             if (s.Techs.Contains("landing_craft")) req -= 2;
             if (s.Techs.Contains("beach_ops")) req -= 2;
             req += GetSeasonPrepDelta(s?.Month ?? 1, zone);
+            if (s != null && !string.IsNullOrEmpty(s.ActiveOpTargetId)
+                && GameData.Nodes.TryGetValue(s.ActiveOpTargetId, out var opN)
+                && (zone == null || opN.Zones.Contains(zone)))
+            {
+                if (s.ActiveOpPlanKind == "blitz") req -= 2;
+                else if (s.ActiveOpPlanKind == "methodical") req += 2;
+            }
+            if (s?.ActiveMutators != null && s.ActiveMutators.Contains("mut_storm_decade") && s.Year <= 1965
+                && (zone == null || zone == "Z2" || zone == "Z3"))
+            {
+                req += 2;
+            }
             return Math.Max(3, req);
         }
 
@@ -1142,6 +1245,110 @@ namespace RocGame
             return (true, "");
         }
 
+        private static readonly string[] OpCodePrefixes = { "海嘯", "雷霆", "中興", "怒潮", "長風", "崑崙" };
+        private static readonly string[] OpCodeSuffixes = { "一號", "二號", "三號", "四號", "五號", "六號" };
+
+        public static void TriggerOperationPlan(GameState s, string dest)
+        {
+            if (s == null || string.IsNullOrEmpty(dest) || !GameData.Nodes.TryGetValue(dest, out var destNode)) return;
+            if (s.PendingEvents.Any(e => e.Id != null && e.Id.StartsWith("op_plan_"))) return;
+            if (s.ActiveOpTargetId == dest) return;
+
+            int h = Math.Abs(dest.Sum(c => (int)c) + s.TotalMonths);
+            string codename = OpCodePrefixes[h % OpCodePrefixes.Length] + OpCodeSuffixes[(h / OpCodePrefixes.Length) % OpCodeSuffixes.Length];
+            string destName = destNode.Name;
+
+            string feintNode = GameData.MainlandIds
+                .Where(id => id != dest && GameData.Nodes[id].Zones.Length > 0 && s.Control.GetValueOrDefault(id) == Faction.PRC)
+                .OrderByDescending(id => !GameData.Nodes[id].Zones.Intersect(destNode.Zones).Any())
+                .ThenBy(id => id)
+                .FirstOrDefault()
+                ?? (dest != "FJ" ? "FJ" : "GD");
+            string feintName = GameData.Nodes[feintNode].Name;
+            string feintZone = GameData.Nodes[feintNode].Zones.FirstOrDefault() ?? "Z3";
+            string feintZoneName = GameData.Zones.TryGetValue(feintZone, out var fz) ? fz.Name : feintZone;
+
+            var ev = new GameEvent
+            {
+                Id = $"op_plan_{dest}_{s.TotalMonths}",
+                Year = s.Year,
+                Month = s.Month,
+                Day = s.Day,
+                Tag = "作戰計畫",
+                Title = $"兩棲登陸作戰會議：{codename}計畫（目標：{destName}）",
+                Desc = $"聯合作戰參謀針對優先目標【{destName}】擬定「{codename}」突穿方案，統帥部可擇一拍板：",
+                Choices = new List<EventChoice>
+                {
+                    new EventChoice
+                    {
+                        Label = "奇襲搶灘",
+                        FactionTag = "navair",
+                        Hint = "海上籌備 -2 天立即搶渡（最低 3 天），出擊部隊航渡略匆促（戰力 -3%）",
+                        Effect = st =>
+                        {
+                            st.ActiveOpPlanKind = "blitz";
+                            st.ActiveOpTargetId = dest;
+                            st.ActiveOpFeintZone = "";
+                            st.ActiveOpCodeName = codename;
+                            foreach (var ord in st.Orders.Where(o => o.To == dest && o.IsPrep))
+                            {
+                                ord.PrepRequired = Math.Max(3, ord.PrepRequired - 2);
+                                var u = UnitById(st, ord.UnitId);
+                                if (u != null) u.Str = Math.Max(15.0, u.Str - 3.0);
+                            }
+                            Log(st, $"⚓ 核定「{codename}」奇襲方案，目標【{destName}】登陸籌備縮減 2 天。", "good");
+                            AddMemoir(st, "作戰計畫", $"{codename}計畫：奇襲{destName}", $"核定對【{destName}】實施快速奇襲搶灘，壓縮登陸準備時程。", 3);
+                        }
+                    },
+                    new EventChoice
+                    {
+                        Label = $"聲東擊西（佯攻{feintName}）",
+                        FactionTag = "intel",
+                        Hint = $"發動{feintZoneName}電訊欺敵，誘使【{destName}】約 18% 守軍抽調馳援【{feintName}】",
+                        Effect = st =>
+                        {
+                            st.ActiveOpPlanKind = "deception";
+                            st.ActiveOpTargetId = dest;
+                            st.ActiveOpFeintZone = feintZone;
+                            st.ActiveOpCodeName = codename;
+                            if (st.Control.GetValueOrDefault(feintNode) == Faction.PRC && st.Control.GetValueOrDefault(dest) == Faction.PRC)
+                            {
+                                double cap = Math.Max(1.0, NominalGarrison(st, feintNode) * 1.5);
+                                double shift = Math.Min(st.Garrison[dest] * 0.18, cap);
+                                if (shift > 0.1)
+                                {
+                                    st.Garrison[dest] = Math.Max(0.5, st.Garrison[dest] - shift);
+                                    st.Garrison[feintNode] += shift;
+                                }
+                            }
+                            Log(st, $"◈ 「{codename}」欺敵奏效！敵誤判我軍指向{feintName}，調動部分當面兵力離防。", "good");
+                            AddMemoir(st, "作戰計畫", $"{codename}計畫：聲東擊西", $"佯指{feintName}成功誤導敵軍部署，削弱【{destName}】正面守備。", 3);
+                        }
+                    },
+                    new EventChoice
+                    {
+                        Label = "步步為營（重砲火力準備）",
+                        FactionTag = "army",
+                        Hint = $"籌備 +2 天集中艦砲／航空炸射，登陸戰力 +15% 並先行削弱【{destName}】守軍 8%",
+                        Effect = st =>
+                        {
+                            st.ActiveOpPlanKind = "methodical";
+                            st.ActiveOpTargetId = dest;
+                            st.ActiveOpFeintZone = "";
+                            st.ActiveOpCodeName = codename;
+                            foreach (var ord in st.Orders.Where(o => o.To == dest && o.IsPrep))
+                                ord.PrepRequired += 2;
+                            if (st.Control.GetValueOrDefault(dest) == Faction.PRC)
+                                st.Garrison[dest] = Math.Max(0.5, st.Garrison[dest] * 0.92);
+                            Log(st, $"★ 核定「{codename}」火力準備方案，對【{destName}】沿岸實施飽和轟炸與重砲壓制。", "good");
+                            AddMemoir(st, "作戰計畫", $"{codename}計畫：步步為營", $"延長整備強化聯合火力壓制後搶灘【{destName}】。", 3);
+                        }
+                    }
+                }
+            };
+            s.PendingEvents.Add(ev);
+        }
+
         public static (int moved, string error) AttackNow(GameState s, IEnumerable<int> unitIds, string dest, bool manual = true)
         {
             if (!IsHostileTarget(s, dest)) return (0, "目標沒有敵軍守備，無法進攻。");
@@ -1187,6 +1394,8 @@ namespace RocGame
                 string portTag = GameData.Nodes[dest].Port ? "（奪港優先）" : "";
                 Log(s, $"⚓ 建立兩棲登陸計畫前往【{destName}】{portTag}（{issuedOrders.Count} 支）：籌備 {firstSea.PrepRequired} 天，{zName}制海 {seaPct:F0}%（需 ≥ 50% 起航）。",
                     seaPct >= 50.0 ? "good" : "info");
+                if (manual && s.PriorityTargets.Contains(dest))
+                    TriggerOperationPlan(s, dest);
             }
             else
             {
@@ -1742,7 +1951,8 @@ namespace RocGame
             double occ = GameData.MainlandIds
                 .Where(id => s.Control[id] == Faction.ROC)
                 .Sum(id => GameData.Nodes[id].Industry * (s.ProvincePolicy?.GetValueOrDefault(id) == "civil" ? 1.25 : 1.0));
-            return tax + s.UsAid * PriceIndex(s) + occ * PriceIndex(s) * 0.18;
+            double aidMult = (s.ActiveMutators != null && s.ActiveMutators.Contains("mut_aid_delayed") && s.Year < 1955) ? 0.5 : 1.0;
+            return tax + s.UsAid * aidMult * PriceIndex(s) + occ * PriceIndex(s) * 0.18;
         }
 
         public static double Interest(GameState s) => s.Debt * 0.04;
@@ -2081,6 +2291,20 @@ namespace RocGame
                 if (!s.FactionLowMonths.ContainsKey(spec.Key)) s.FactionLowMonths[spec.Key] = 0;
             }
             s.Memoir ??= new();
+            s.ActiveOpPlanKind ??= "";
+            s.ActiveOpTargetId ??= "";
+            s.ActiveOpFeintZone ??= "";
+            s.ActiveOpCodeName ??= "";
+            s.UndergroundNet ??= new();
+            s.UndergroundProg ??= new();
+            foreach (var mid in GameData.MainlandIds)
+            {
+                if (!s.UndergroundNet.ContainsKey(mid)) s.UndergroundNet[mid] = 0;
+                if (!s.UndergroundProg.ContainsKey(mid)) s.UndergroundProg[mid] = 0.0;
+            }
+            if (string.IsNullOrEmpty(s.PrcDoctrine)) s.PrcDoctrine = "coastal_wall";
+            if (string.IsNullOrEmpty(s.NextPrcDoctrine)) s.NextPrcDoctrine = "inland_lure";
+            s.ActiveMutators ??= new();
             s.ResearchProgMap ??= new();
             s.ActiveTechs ??= new();
             s.ResearchQueue ??= new();
@@ -2291,7 +2515,8 @@ namespace RocGame
             double armyFacMult = DominantStaffFaction(s) == "army" ? 1.06 : 1.0;
             double dirCombat = (HasDirective(s, "dir_north_expedition") ? 1.08 : 1.0)
                              * (HasDirective(s, "dir_drive_ussr") && s.Control.GetValueOrDefault(nid) == Faction.USSR ? 1.10 : 1.0);
-            return p * moraleF * (1.0 + s.BattleBonus) * fort * localDrag * armyFacMult * dirCombat;
+            double opMethodical = (attacking && s.ActiveOpPlanKind == "methodical" && nid == s.ActiveOpTargetId) ? 1.15 : 1.0;
+            return p * moraleF * (1.0 + s.BattleBonus) * fort * localDrag * armyFacMult * dirCombat * opMethodical;
         }
 
         public static void Battle(GameState s, string nid, bool rocAttacking, HashSet<int> landedIds)
@@ -2338,11 +2563,15 @@ namespace RocGame
                     else s.Intl += 8;
                     string portMsg = n.Kind == NodeKind.Mainland && n.Port ? "（⚓ 已搶下海岸港口，開通補給走廊與就地徵募！）" : "";
                     Log(s, $"★ 國軍擊潰{enemyName}，光復【{n.Name}（{n.City}）】！{portMsg}", "big");
+                    if (!n.Major && pl >= 4.0)
+                        AddMemoir(s, "重要戰役", $"{n.Name}激戰收復", $"國軍克復【{n.Name}】，殲滅{enemyName}約 {pl:F1} 師。", 3);
                     EventSystem.OnCapture(s, nid);
                 }
                 else
                 {
                     Log(s, $"{n.Name}守住了{enemyName}反撲。", "good");
+                    if (pl >= 4.0)
+                        AddMemoir(s, "防禦勝仗", $"{n.Name}堅守退敵", $"成功擊退{enemyName}對【{n.Name}】的大規模反撲，敵軍折損約 {pl:F1} 師。", 3);
                 }
             }
             else if (after <= 0)
@@ -2350,6 +2579,7 @@ namespace RocGame
                 if (s.Control[nid] == Faction.ROC)
                 {
                     s.Control[nid] = Faction.PRC;
+                    if (n.Kind == NodeKind.Island) s.Flags["lostAnyIsland"] = 1;
                     s.Morale -= n.Kind == NodeKind.Taiwan ? 100 : 5;
                     Log(s, $"✖ {n.Name}失守。", "bad");
                 }
@@ -2362,6 +2592,13 @@ namespace RocGame
             else
             {
                 Log(s, $"{n.Name}激戰：國軍折損 {rl:F1} 師，{enemyName}折損 {pl:F1} 師（戰力比 {r:F2}）。");
+            }
+            if (nid == s.ActiveOpTargetId)
+            {
+                s.ActiveOpPlanKind = "";
+                s.ActiveOpTargetId = "";
+                s.ActiveOpFeintZone = "";
+                s.ActiveOpCodeName = "";
             }
         }
 
@@ -2489,7 +2726,8 @@ namespace RocGame
                         }
                         if ((s.Month is 7 or 8 or 9) && (order.Zone is "Z2" or "Z3" or "Z4"))
                         {
-                            double storm = 2.5 * (1.0 - 0.4 * sea) * (0.6 + 0.8 * Rng(s));
+                            double stormMult = (s.ActiveMutators != null && s.ActiveMutators.Contains("mut_storm_decade") && s.Year <= 1965) ? 1.5 : 1.0;
+                            double storm = 2.5 * (1.0 - 0.4 * sea) * (0.6 + 0.8 * Rng(s)) * stormMult;
                             unit.Str -= storm;
                         }
                         if (hostile || reverseBeachhead) { activeZones.Add(order.Zone); landedIds.Add(unit.Id); }
@@ -2527,6 +2765,13 @@ namespace RocGame
                             : "";
                         Log(s, $"國軍兵不血刃進駐並收復【{GameData.Nodes[dest].Name}】！{portMsg}", "good");
                         EventSystem.OnCapture(s, dest);
+                        if (dest == s.ActiveOpTargetId)
+                        {
+                            s.ActiveOpPlanKind = "";
+                            s.ActiveOpTargetId = "";
+                            s.ActiveOpFeintZone = "";
+                            s.ActiveOpCodeName = "";
+                        }
                     }
                     foreach (string zone in GameData.Nodes[dest].Zones) activeZones.Add(zone);
                 }
@@ -2638,6 +2883,14 @@ namespace RocGame
             if (HasDirective(s, "dir_allied_ring")) { s.Intl += 1.0; s.UsRel += 1.0; }
             if (HasDirective(s, "dir_cultural_wave")) s.Intl += 0.5;
             EvaluateDirectivePromise(s);
+            if (s.Year >= 1953 && (s.Year - 1953) % 5 == 0)
+            {
+                s.PrcDoctrine = string.IsNullOrEmpty(s.NextPrcDoctrine) ? "inland_lure" : s.NextPrcDoctrine;
+                var candidates = PrcDoctrines.Select(d => d.Key).Where(k => k != s.PrcDoctrine).ToList();
+                int pick = (int)(Rng(s) * candidates.Count) % candidates.Count;
+                s.NextPrcDoctrine = candidates[pick];
+                Log(s, "◈ 對岸進入新一輪五年戰略調整期，當面兵力部署出現重組跡象。", "info");
+            }
             s.History.Add(Snapshot(s));
         }
 
@@ -2712,6 +2965,7 @@ namespace RocGame
                 if (s.Control[nid] == Faction.ROC && s.Garrison[nid] > 0.01 && UnitsAt(s, nid, UnitDomain.Land).Count == 0)
                 {
                     s.Control[nid] = Faction.PRC;
+                    if (GameData.Nodes[nid].Kind == NodeKind.Island) s.Flags["lostAnyIsland"] = 1;
                     rep.BattleNodes.Add(nid);
                     Log(s, $"✖ {GameData.Nodes[nid].Name}無兵防守，遭敵軍佔領。", "bad");
                 }
@@ -2820,6 +3074,37 @@ namespace RocGame
                 else s.FactionLowMonths[spec.Key] = 0;
             }
 
+            // 敵後滲透網路 (F) 月度推進
+            s.UndergroundNet ??= new();
+            s.UndergroundProg ??= new();
+            double ugTechBon = (s.Techs.Contains("psywar") ? 1.8 : 0.0)
+                             + (s.Techs.Contains("underground") ? 1.8 : 0.0)
+                             + (s.Techs.Contains("united_subvert") ? 1.8 : 0.0)
+                             + (s.Techs.Contains("radio_liberty") ? 1.8 : 0.0);
+            double intelFacMult = DominantStaffFaction(s) == "intel" ? 1.25 : 1.0;
+            foreach (var mid in GameData.MainlandIds)
+            {
+                if (s.Control.GetValueOrDefault(mid) == Faction.ROC)
+                {
+                    s.UndergroundNet[mid] = 0;
+                    s.UndergroundProg[mid] = 0.0;
+                    continue;
+                }
+                if (s.Control.GetValueOrDefault(mid) != Faction.PRC) continue;
+                int lv = s.UndergroundNet.GetValueOrDefault(mid, 0);
+                if (lv >= 3) continue;
+                double gain = (2.2 + s.Unrest.GetValueOrDefault(mid, 0.0) * 0.12 + ugTechBon) * intelFacMult;
+                double prog = s.UndergroundProg.GetValueOrDefault(mid, 0.0) + gain;
+                while (prog >= 100.0 && lv < 3)
+                {
+                    prog -= 100.0;
+                    lv++;
+                    Log(s, $"◈ 【{GameData.Nodes[mid].Name}】敵後地下組織成長至 Lv.{lv}。", lv == 3 ? "good" : "info");
+                }
+                s.UndergroundNet[mid] = lv;
+                s.UndergroundProg[mid] = prog;
+            }
+
             RollFog(s);
             Normalize(s);
             TouchFrontClock(s);
@@ -2902,8 +3187,18 @@ namespace RocGame
 
         private static void PrcAi(GameState s, TurnReport rep, HashSet<string> activeZones, double dt)
         {
+            int heldCount = HeldMainland(s).Count;
+            double mobScale = heldCount >= 2 ? 1.0 + Math.Min(0.85, heldCount * 0.12) : 1.0;
+            if (heldCount >= 2 && !s.HasFlag("prcMobWarned"))
+            {
+                s.Flags["prcMobWarned"] = 1;
+                Log(s, "‼ 敵方啟動全國緊急總動員體制，加派內陸預備師團馳援前線並伺機反撲！", "bad");
+            }
+            double docReinfMult = s.PrcDoctrine == "internal_purge" ? 0.90 : 1.0;
+            double mutHarvestMult = (s.ActiveMutators != null && s.ActiveMutators.Contains("mut_prc_harvest") && s.Year <= 1959) ? 1.10 : 1.0;
             double reinf = (10.0 + (s.Year - 1950) * 0.18) * PrcStabFactor(s) * s.PrcReinfMod
-                         * (s.Techs.Contains("tienma") ? 0.75 : 1.0) * (1.0 - 0.5 * s.PrcSovTension) * (1.0 - 0.6 * PrcLostIndustry(s)) * dt;
+                         * (s.Techs.Contains("tienma") ? 0.75 : 1.0) * (1.0 - 0.5 * s.PrcSovTension) * (1.0 - 0.6 * PrcLostIndustry(s))
+                         * mobScale * docReinfMult * mutHarvestMult * dt;
 
             foreach (var nid in GameData.MainlandIds)
             {
@@ -2926,13 +3221,25 @@ namespace RocGame
                 if (s.Control[id] != Faction.PRC) continue;
                 double nom = NominalGarrison(s, id);
                 double threat = LandStr(UnitsAt(s, id, UnitDomain.Land)) * 1.5;
+                bool adjRoc = false;
                 foreach (var a in GameData.Nodes[id].Adj)
                 {
                     if (s.Control[a] == Faction.ROC || UnitsAt(s, a, UnitDomain.Land).Count > 0)
+                    {
                         threat += LandStr(UnitsAt(s, a, UnitDomain.Land));
+                        adjRoc = true;
+                    }
                     if (s.Control[a] == Faction.USSR) threat += 2.0;
                 }
-                double target = nom + threat;
+                if (heldCount >= 2 && adjRoc) threat *= 1.35;
+                bool coastal = GameData.Nodes[id].Zones.Length > 0;
+                double docTargetMult = s.PrcDoctrine switch
+                {
+                    "coastal_wall" => coastal ? 1.15 : 0.90,
+                    "inland_lure" => coastal ? 0.90 : (adjRoc ? 1.25 : 1.0),
+                    _ => 1.0
+                };
+                double target = (nom + threat) * docTargetMult;
                 needs.Add((id, target - s.Garrison[id], target));
             }
 
@@ -3028,7 +3335,8 @@ namespace RocGame
                     if (s.Control[src] != Faction.PRC) continue;
                     double force = Math.Min(amph, s.Garrison[src] * 0.4);
                     bool zsExposed1950 = iid == "ZS" && s.Year == 1950 && (def < 1.3 || s.Month >= 5);
-                    double reqChance = zsExposed1950 ? (def < 1.3 ? 0.48 : 0.18) : 0.032;
+                    double reqChance = (zsExposed1950 ? (def < 1.3 ? 0.48 : 0.18) : 0.032)
+                                     * (s.PrcDoctrine == "strait_gamble" && !zsExposed1950 ? 1.8 : 1.0);
                     if ((zsExposed1950 || pP > rP * 1.4) && force > def * (zsExposed1950 ? 1.05 : 1.3) && s.PrcStab > 40 && Chance(s, reqChance))
                     {
                         double landed = force * (1.0 - 0.5 * SeaSup(s, z));
@@ -3087,7 +3395,8 @@ namespace RocGame
 
                 double committedPrcPower = EnemyPowerAt(s, target, Math.Max(0, s.Garrison[target]), defending: false)
                                          * (1.0 + 0.6 * (1.0 - air));
-                double forceNeeded = (rocPower * 3.0 - committedPrcPower) / prcPowerPerDivision;
+                double ratioNeed = s.PrcDoctrine == "inland_lure" ? 2.45 : 3.0;
+                double forceNeeded = (rocPower * ratioNeed - committedPrcPower) / prcPowerPerDivision;
                 // Count both armies' combat power. Existing PRC troops already attacking this province reduce
                 // the new force needed; require a 3:1 effective-power advantage before committing more troops.
                 if (forceNeeded <= 0.01) continue;
@@ -3174,6 +3483,8 @@ namespace RocGame
         private static void PrcUpdate(GameState s, double dt)
         {
             double target = s.Year >= 1978 ? 75.0 : 65.0;
+            if (s.ActiveMutators != null && s.ActiveMutators.Contains("mut_prc_harvest") && s.Year <= 1959)
+                target = Math.Min(88.0, target + 8.0);
             int lostCount = GameData.MainlandIds.Count(id => s.Control[id] != Faction.PRC);
             bool radio = s.Techs.Contains("radio_liberty");
             bool cyber = s.Techs.Contains("cyber_psy");
@@ -3181,8 +3492,13 @@ namespace RocGame
             bool relief = s.Techs.Contains("mainland_relief");
             bool kinHorn = s.Techs.Contains("kinmen_horn");
             s.PrcStab += ((target - s.PrcStab) * 0.08 - lostCount * 1.6 - (radio ? 0.45 : 0.0) - (cyber ? 0.35 : 0.0) - (cult ? 0.20 : 0.0)) * dt;
+            if (s.PrcDoctrine == "internal_purge")
+                s.PrcStab += 0.35 * dt * 12.0;
             s.PrcGdpMod += (1.0 - s.PrcGdpMod) * 0.06 * dt;
-            s.PrcSovTension = Math.Max(0, s.PrcSovTension - 0.04 * dt);
+            double tensionFloor = (s.ActiveMutators != null && s.ActiveMutators.Contains("mut_ussr_early"))
+                ? (s.Year >= 1955 ? 0.30 : 0.15)
+                : 0.0;
+            s.PrcSovTension = Math.Max(tensionFloor, s.PrcSovTension - 0.04 * dt);
             foreach (var id in GameData.MainlandIds)
             {
                 if (s.Control[id] != Faction.PRC) continue;
@@ -3190,9 +3506,18 @@ namespace RocGame
                 double psyBoost = (radio ? 1.4 : 0) + (cyber ? 1.0 : 0) + (relief ? 0.6 : 0) + (kinHorn && (id == "FJ" || id == "ZJ") ? 1.2 : 0);
                 s.Unrest[id] += ((adjRoc ? 3.5 : 0) - 1.5 + (s.PrcStab < 40 ? 2.5 : 0) + psyBoost) * dt;
             }
+            if (s.PrcDoctrine == "internal_purge")
+            {
+                var prcProvs = GameData.MainlandIds.Where(id => s.Control[id] == Faction.PRC).ToList();
+                if (prcProvs.Count > 0)
+                {
+                    string pick = prcProvs[(s.TotalMonths + prcProvs.Count) % prcProvs.Count];
+                    s.Unrest[pick] = Clamp(s.Unrest[pick] + 0.6, 0.0, 100.0);
+                }
+            }
         }
 
-        // ---------- 勝敗與 14 種結局判定 ----------
+        // ---------- 勝敗與 16 種結局判定 ----------
         public static void CheckEnd(GameState s, bool tickAnnualCounters = true)
         {
             if (s.Over != null) return;
@@ -3246,6 +3571,11 @@ namespace RocGame
                     return;
                 }
                 if (s.Morale <= 0) { Finish(s, "mutiny"); return; }
+                if (s.FactionInfluence != null && s.FactionInfluence.Values.Any(v => v >= 80.0) && s.Morale < 40.0)
+                {
+                    Finish(s, "junta");
+                    return;
+                }
                 if (s.GetFlag("warlordRisk") >= 3 && held.Count >= 2) { Finish(s, "warlordR"); return; }
                 double rocLand = LandStr(s.Units);
                 if (s.PrcStab <= 0 && s.GetFlag("prcZeroTurns") >= 2 && (held.Count < 4 || rocLand < 15))
@@ -3261,6 +3591,12 @@ namespace RocGame
                 bool hasMajor = held.Contains("JS") || held.Contains("GD") || held.Contains("HN");
                 if (held.Count >= 5 && hasMajor) { Finish(s, "nanbei"); return; }
                 if (held.Count >= 1) { Finish(s, "beachhead"); return; }
+                if (!s.HasFlag("lostAnyIsland") && s.Control["TW"] == Faction.ROC
+                    && GameData.NodeIds.Where(id => GameData.Nodes[id].Kind == NodeKind.Island).All(id => s.Control.GetValueOrDefault(id) == Faction.ROC))
+                {
+                    Finish(s, "fortress");
+                    return;
+                }
                 if (s.Gdp > 1800 && s.Intl > 40) { Finish(s, "status"); return; }
                 Finish(s, "pianan");
             }
@@ -3324,6 +3660,13 @@ namespace RocGame
             double sc = HeldMainland(s).Sum(id => GameData.Nodes[id].Major ? 150 : 80);
             sc -= UssrNodes(s).Count * 100;
             sc += Math.Round(s.Gdp / 20.0) + s.Intl + s.Morale + s.BattlesWon * 10;
+            if (s.ActiveMutators != null && s.ActiveMutators.Count > 0)
+            {
+                double bon = s.ActiveMutators
+                    .Where(m => GameData.Mutators.ContainsKey(m))
+                    .Sum(m => GameData.Mutators[m].ScoreBonus);
+                sc *= (1.0 + bon);
+            }
             return (int)Math.Round(sc);
         }
 

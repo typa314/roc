@@ -90,8 +90,10 @@ namespace RocGame
                 "科技樹名稱與說明不應包含『史實』或『架空』提示字樣");
             Assert(!EventSystem.HistoricalEvents.Any(e => e.Tag.Contains("史實") || e.Tag.Contains("架空") || e.Choices.Any(c => c.Label.Contains("史實") || c.Label.Contains("架空") || (c.Stance != null && (c.Stance.Contains("史實") || c.Stance.Contains("架空"))))),
                 "事件標題與選項不應包含『史實』或『架空』提示字樣");
-            Assert(GameData.Endings.Count == 14, $"結局應有 14 種，實際為 {GameData.Endings.Count}");
-            LogLine("[PASS] 1. 地圖節點(33)、大陸全境省分(26)、五大分支科技樹(63)、結局(14) 定義完整");
+            Assert(!GameData.Mutators.Values.Any(m => m.Title.Contains("史實") || m.Title.Contains("架空") || m.Desc.Contains("史實") || m.Desc.Contains("架空")),
+                "戰局變數標題與說明不應包含『史實』或『架空』提示字樣");
+            Assert(GameData.Endings.Count == 16, $"結局應有 16 種，實際為 {GameData.Endings.Count}");
+            LogLine("[PASS] 1. 地圖節點(33)、大陸全境省分(26)、五大分支科技樹(63)、結局(16) 定義完整");
 
             // 2. 驗證 1950 史實開局（黃金約 $1.25 億、GDP $14 億、殘編裝甲總隊）、1950 即時反攻自由度與時代紀錄點解鎖
             {

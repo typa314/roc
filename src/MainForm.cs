@@ -47,6 +47,8 @@ namespace RocGame
         private bool _selectedEasyMode = false;
         private Button _btnModeNormal;
         private Button _btnModeEasy;
+        private readonly HashSet<string> _selectedMutators = new();
+        private readonly Dictionary<string, Button> _mutatorBtns = new();
 
         // 隨選右側戰情抽屜狀態："none" | "build" | "tech" | "chart" | "intel"
         private string _activeDrawer = "none";
@@ -1234,8 +1236,8 @@ namespace RocGame
         {
             var card = new WarRoomPanel
             {
-                Size = new Size(616, 650),
-                Location = new Point(64, 58),
+                Size = new Size(616, 616),
+                Location = new Point(64, 52),
                 BackColor = Color.FromArgb(242, 26, 23, 19),
                 FrameBorderColor = GoldCol,
                 InnerBorderColor = Color.FromArgb(76, 65, 47),
@@ -1248,7 +1250,7 @@ namespace RocGame
                 ForeColor = GoldCol,
                 BackColor = Color.Transparent,
                 Font = new Font("Microsoft JhengHei UI", 10.6f, FontStyle.Bold),
-                Location = new Point(30, 18),
+                Location = new Point(30, 14),
                 AutoSize = true
             };
 
@@ -1257,8 +1259,8 @@ namespace RocGame
                 Text = "國光：反攻大陸",
                 ForeColor = TextMain,
                 BackColor = Color.Transparent,
-                Font = new Font("Microsoft JhengHei UI", 28f, FontStyle.Bold),
-                Location = new Point(26, 42),
+                Font = new Font("Microsoft JhengHei UI", 26f, FontStyle.Bold),
+                Location = new Point(26, 36),
                 AutoSize = true
             };
 
@@ -1267,12 +1269,12 @@ namespace RocGame
                 Text = "二戰結束、國府播遷來台，您將扮演中華民國三軍最高統帥（全戰役一律自 1950 年真實局勢起步）。\n" +
                        "• 1950 年初黃金存底僅餘約 $1.25 億、台灣 GDP $14 億，可自行評估當下立即搶灘或先固守整軍\n" +
                        "• 慎防北方蘇聯／俄羅斯趁亂出兵侵占東北、內蒙與新疆\n" +
-                       "• 單局 0.5～2 小時；推進達到時代里程碑後將解鎖「歷史紀錄點」，下次可直接自同紀錄點續開分歧！",
+                       "• 推進達到時代里程碑後將解鎖「紀錄點」，下次可直接自同紀錄點續開不同結局！",
                 ForeColor = TextMain,
                 BackColor = Color.Transparent,
-                Font = new Font("Microsoft JhengHei UI", 9.1f),
-                Location = new Point(30, 102),
-                Size = new Size(556, 118)
+                Font = new Font("Microsoft JhengHei UI", 8.8f),
+                Location = new Point(30, 86),
+                Size = new Size(556, 98)
             };
 
             var lblModeHdr = new Label
@@ -1281,42 +1283,67 @@ namespace RocGame
                 ForeColor = GoldCol,
                 BackColor = Color.Transparent,
                 Font = new Font("Microsoft JhengHei UI", 8.8f, FontStyle.Bold),
-                Location = new Point(30, 224),
+                Location = new Point(30, 190),
                 Size = new Size(556, 18)
             };
 
-            _btnModeNormal = CreateWarButton("◆ 一般模式（無路線誘導）", Color.FromArgb(52, 86, 114), GoldCol, 272, 36, GoldCol);
-            _btnModeNormal.Font = new Font("Microsoft JhengHei UI", 9.2f, FontStyle.Bold);
-            _btnModeNormal.Location = new Point(30, 246);
+            _btnModeNormal = CreateWarButton("◆ 一般模式（無路線誘導）", Color.FromArgb(52, 86, 114), GoldCol, 272, 34, GoldCol);
+            _btnModeNormal.Font = new Font("Microsoft JhengHei UI", 9.0f, FontStyle.Bold);
+            _btnModeNormal.Location = new Point(30, 210);
             _btnModeNormal.Click += (_, _) => SetGameMode(false);
 
-            _btnModeEasy = CreateWarButton("★ 簡易模式（顯示方針提示）", Color.FromArgb(34, 30, 25), TextSub, 272, 36, BorderCol);
-            _btnModeEasy.Font = new Font("Microsoft JhengHei UI", 9.2f, FontStyle.Bold);
-            _btnModeEasy.Location = new Point(314, 246);
+            _btnModeEasy = CreateWarButton("★ 簡易模式（顯示方針提示）", Color.FromArgb(34, 30, 25), TextSub, 272, 34, BorderCol);
+            _btnModeEasy.Font = new Font("Microsoft JhengHei UI", 9.0f, FontStyle.Bold);
+            _btnModeEasy.Location = new Point(314, 210);
             _btnModeEasy.Click += (_, _) => SetGameMode(true);
 
-            var btn1950 = CreateWarButton("▶  1950 風雨飄搖 — 從頭展開新戰役（唯一初始開局）", Color.FromArgb(52, 86, 114), TextMain, 556, 46, GoldCol);
-            btn1950.Font = new Font("Microsoft JhengHei UI", 10.2f, FontStyle.Bold);
-            btn1950.Location = new Point(30, 294);
+            var lblMutHdr = new Label
+            {
+                Text = "◈ 戰局變數（可自選 0–2 項 · 提高初期難度並增加最終通關評分）",
+                ForeColor = GoldCol,
+                BackColor = Color.Transparent,
+                Font = new Font("Microsoft JhengHei UI", 8.6f, FontStyle.Bold),
+                Location = new Point(30, 250),
+                Size = new Size(556, 18)
+            };
+
+            _mutatorBtns.Clear();
+            int mx = 30;
+            foreach (var mut in GameData.Mutators.Values)
+            {
+                string mId = mut.Id;
+                var bMut = CreateWarButton($"{mut.Title} (+{mut.ScoreBonus * 100:F0}%)", Color.FromArgb(34, 30, 25), TextSub, 133, 30, BorderCol);
+                bMut.Font = new Font("Microsoft JhengHei UI", 8.0f, FontStyle.Bold);
+                bMut.Location = new Point(mx, 270);
+                _checkpointToolTip.SetToolTip(bMut, $"{mut.Title}：{mut.Desc}（通關評分 +{mut.ScoreBonus * 100:F0}%）");
+                bMut.Click += (_, _) => ToggleMutatorSelection(mId);
+                _mutatorBtns[mId] = bMut;
+                card.Controls.Add(bMut);
+                mx += 141;
+            }
+
+            var btn1950 = CreateWarButton("▶  1950 風雨飄搖 — 從頭展開新戰役（唯一初始開局）", Color.FromArgb(52, 86, 114), TextMain, 556, 42, GoldCol);
+            btn1950.Font = new Font("Microsoft JhengHei UI", 10.0f, FontStyle.Bold);
+            btn1950.Location = new Point(30, 308);
             btn1950.Click += (_, _) => StartScenario("1950");
 
             var lblCpHdr = new Label
             {
-                Text = "◆ 時代紀錄點（須自 1950 起打到一定程度方能解鎖，解鎖後可自同紀錄點開展分歧結局）",
+                Text = "◆ 時代紀錄點（須自 1950 起打到一定程度方能解鎖，解鎖後可自同紀錄點續開分歧）",
                 ForeColor = GoldCol,
                 BackColor = Color.Transparent,
-                Font = new Font("Microsoft JhengHei UI", 8.8f, FontStyle.Bold),
-                Location = new Point(30, 352),
-                Size = new Size(556, 20)
+                Font = new Font("Microsoft JhengHei UI", 8.6f, FontStyle.Bold),
+                Location = new Point(30, 358),
+                Size = new Size(556, 18)
             };
 
-            card.Controls.AddRange(new Control[] { lblSub, lblTitle, lblDesc, lblModeHdr, _btnModeNormal, _btnModeEasy, btn1950, lblCpHdr });
+            card.Controls.AddRange(new Control[] { lblSub, lblTitle, lblDesc, lblModeHdr, _btnModeNormal, _btnModeEasy, lblMutHdr, btn1950, lblCpHdr });
 
-            int cy = 378;
+            int cy = 380;
             foreach (var spec in SimEngine.CheckpointSpecs)
             {
                 string kCopy = spec.Key;
-                var bCp = CreateWarButton("", Color.FromArgb(34, 30, 25), TextSub, 556, 40, BorderCol);
+                var bCp = CreateWarButton("", Color.FromArgb(34, 30, 25), TextSub, 556, 38, BorderCol);
                 bCp.Font = new Font("Microsoft JhengHei UI", 8.8f, FontStyle.Bold);
                 bCp.TextAlign = ContentAlignment.MiddleLeft;
                 bCp.AccessibleName = spec.Title;
@@ -1324,12 +1351,12 @@ namespace RocGame
                 bCp.Click += (_, _) => StartFromCheckpoint(kCopy);
                 _checkpointBtns[kCopy] = bCp;
                 card.Controls.Add(bCp);
-                cy += 46;
+                cy += 44;
             }
 
-            var btnResume = CreateWarButton("返回當前戰局", BgCard, GoldCol, 556, 40, GoldDim);
+            var btnResume = CreateWarButton("返回當前戰局", BgCard, GoldCol, 556, 38, GoldDim);
             btnResume.Font = new Font("Microsoft JhengHei UI", 9.6f, FontStyle.Bold);
-            btnResume.Location = new Point(30, 524);
+            btnResume.Location = new Point(30, 516);
             btnResume.Click += (_, _) =>
             {
                 _showTitle = false;
@@ -1342,15 +1369,42 @@ namespace RocGame
                 Text = "提示：直接拖曳駐軍到目的地；敵區立即交戰，我方地區立即調防。空白鍵暫停／繼續。",
                 ForeColor = TextSub,
                 BackColor = Color.Transparent,
-                Font = new Font("Microsoft JhengHei UI", 8.5f),
-                Location = new Point(30, 574),
+                Font = new Font("Microsoft JhengHei UI", 8.4f),
+                Location = new Point(30, 562),
                 Size = new Size(556, 38)
             };
 
             card.Controls.AddRange(new Control[] { btnResume, lblTip });
             _titleOverlay.Controls.Add(card);
             UpdateModeButtonsUi();
+            UpdateMutatorButtonsUi();
             RefreshTitleOverlay();
+        }
+
+        private void ToggleMutatorSelection(string id)
+        {
+            if (!_selectedMutators.Remove(id))
+            {
+                if (_selectedMutators.Count >= 2)
+                {
+                    string oldest = _selectedMutators.First();
+                    _selectedMutators.Remove(oldest);
+                }
+                _selectedMutators.Add(id);
+            }
+            UpdateMutatorButtonsUi();
+        }
+
+        private void UpdateMutatorButtonsUi()
+        {
+            foreach (var kv in _mutatorBtns)
+            {
+                bool on = _selectedMutators.Contains(kv.Key);
+                SetWarButtonStyle(kv.Value,
+                    on ? Color.FromArgb(118, 72, 26) : Color.FromArgb(34, 30, 25),
+                    on ? GoldCol : TextSub,
+                    on ? GoldCol : BorderCol);
+            }
         }
 
         private void UpdateModeButtonsUi()
@@ -1430,7 +1484,7 @@ namespace RocGame
 
         public void StartScenario(string preset)
         {
-            State = EventSystem.NewScenario(preset, easyMode: _selectedEasyMode);
+            State = EventSystem.NewScenario(preset, easyMode: _selectedEasyMode, mutators: preset == "1950" ? _selectedMutators : null);
             UpdateModeButtonsUi();
                 _checkedUnitIds.Clear();
             SelectedZone = null;
@@ -1647,7 +1701,8 @@ namespace RocGame
                     $"台灣 GDP：${State.Gdp:F0} 億  vs  對岸 GDP：${SimEngine.PrcGdp(State):F0} 億\n" +
                     $"共軍部署：{SimEngine.PrcDeployed(State):F0} 師（隨年份擴編，地圖紅籌碼同步增加）\n" +
                     $"國軍綜合軍力：{SimEngine.RocMilIndex(State):F1}  vs  共軍軍力：{SimEngine.PrcMilIndex(State):F1}\n" +
-                    $"共軍喪失工業比例：{SimEngine.PrcLostIndustry(State) * 100:F0}%  |  物資補給上限：{State.SupplyCap:F0}";
+                    $"共軍喪失工業比例：{SimEngine.PrcLostIndustry(State) * 100:F0}%  |  物資補給上限：{State.SupplyCap:F0}\n" +
+                    $"{SimEngine.DescribePrcDoctrineIntel(State)}";
                 _hudTooltipCard.Location = new Point((int)_hudRectStability.X, 8);
             }
             else
@@ -2833,8 +2888,13 @@ namespace RocGame
                 }
             }
 
+            string ugStr = (n.Kind == NodeKind.Mainland && ctrl == Faction.PRC && State.UndergroundNet != null)
+                ? (SimEngine.HasIntel(State, n.Id)
+                    ? $"  |  地下網：Lv.{State.UndergroundNet.GetValueOrDefault(n.Id, 0)}"
+                    : "  |  地下網：Lv.?")
+                : "";
             string text = $"【{n.Name}（{n.City}）】 — {ctrlStr}\n" +
-                          $"國軍：{rocS:F1} 師  |  敵軍：{(exact ? $"{estG:F1} 師" : $"~{estG:F1} 師")}  |  工業：{n.Industry}  |  制空：{SimEngine.NodeAirSup(State, n.Id) * 100:F0}%" +
+                          $"國軍：{rocS:F1} 師  |  敵軍：{(exact ? $"{estG:F1} 師" : $"~{estG:F1} 師")}  |  工業：{n.Industry}  |  制空：{SimEngine.NodeAirSup(State, n.Id) * 100:F0}%{ugStr}" +
                           (string.IsNullOrEmpty(moveHint) ? "" : "\n" + moveHint);
 
             using var f = new Font("Microsoft JhengHei UI", 8.8f);

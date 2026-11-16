@@ -1204,6 +1204,8 @@ namespace RocGame
             }
 
             // 系統 D：光復區治理方針（Major 重鎮彈三選一，一般省分沿用上次選擇）
+            if (n.Major)
+                SimEngine.AddMemoir(s, "重大戰果", $"光復重鎮【{n.Name}】", $"王師克復戰略重鎮【{n.Name}（{n.City}）】，震撼中外。", 5);
             s.ProvincePolicy ??= new();
             if (n.Major && !s.FiredEvents.Contains($"lib_policy_{nid}"))
             {
@@ -1500,9 +1502,9 @@ namespace RocGame
             SimEngine.CheckEnd(s, tickAnnualCounters: false);
         }
 
-        public static GameState NewScenario(string preset, uint? seed = null, bool easyMode = false)
+        public static GameState NewScenario(string preset, uint? seed = null, bool easyMode = false, IEnumerable<string> mutators = null)
         {
-            var s = SimEngine.NewGame(seed, easyMode);
+            var s = SimEngine.NewGame(seed, easyMode, mutators);
             if (preset == "1962")
             {
                 s.PendingEvents.Clear();

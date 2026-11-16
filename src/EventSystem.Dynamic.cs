@@ -464,6 +464,23 @@ namespace RocGame
                 }
             }
 
+            // 系統 F：敵後地下網 Lv.3 成熟觸發三選一運用
+            if (s.UndergroundNet != null)
+            {
+                var ugCandidates = ctx.PrcFrontNodes
+                    .Where(id => s.Control.GetValueOrDefault(id) == Faction.PRC)
+                    .Concat(GameData.MainlandIds.Where(id => s.Control.GetValueOrDefault(id) == Faction.PRC && GameData.Nodes[id].Zones.Length > 0))
+                    .Distinct();
+                foreach (var uid in ugCandidates)
+                {
+                    if (s.UndergroundNet.GetValueOrDefault(uid, 0) >= 3 && CooldownOk(s, $"ug_mature_{uid}", 12))
+                    {
+                        s.PendingEvents.Add(BuildUndergroundMatureEvent(s, uid));
+                        return;
+                    }
+                }
+            }
+
             // 9) 多元主題加權輪抽池：破除固定順序重複，依當下戰局與冷卻輪替呈現外交、內政、諜報、財經、海空與前線事件
             if (!SimEngine.Chance(s, 0.72)) return;
 
@@ -1947,6 +1964,94 @@ namespace RocGame
                             st.Flags["warlordRisk"] = st.GetFlag("warlordRisk") + 1;
                             SimEngine.AddMemoir(st, "中樞政情", $"壓制{spec.Name}反彈", $"{spec.Chief}遭撤換整肅，派系積怨轉為潛在割據風險。", 2);
                             SimEngine.Log(st, $"中樞強硬壓制【{spec.Name}】抗議，前線與部會裂痕加深。", "bad");
+                        }
+                    }
+                }
+            };
+        }
+
+        private static GameEvent BuildUndergroundMatureEvent(GameState s, string nid)
+        {
+            var n = GameData.Nodes[nid];
+            string adjPrc = GameData.Nodes[nid].Adj
+                .Where(a => GameData.Nodes[a].Kind == NodeKind.Mainland && s.Control.GetValueOrDefault(a) == Faction.PRC)
+                .OrderBy(a => s.UndergroundNet.GetValueOrDefault(a, 0))
+                .FirstOrDefault();
+            string adjName = adjPrc != null ? GameData.Nodes[adjPrc].Name : "鄰近省區";
+
+            return new GameEvent
+            {
+                Id = $"ug_mature_{nid}_{s.Year}_{s.Month}",
+                Year = s.Year,
+                Month = s.Month,
+                Day = s.Day,
+                Tag = "敵後情報網",
+                Title = $"敵後組織成熟：【{n.Name}】地下電台與行動網待命",
+                Desc = $"潛伏於【{n.Name}】的地下工作站已建成完整三層細胞網，現請示統帥部下一步戰略運用：",
+                Choices = new List<EventChoice>
+                {
+                    new() {
+                        Label = $"策動【{n.Name}】武裝起義破壞敵後防線",
+                        Hint = $"{n.Name}敵軍折損 20%、動盪 +20；若當面有國軍接應則編成反共民兵，該省地下網歸零",
+                        FactionTag = "army",
+                        Effect = st => {
+                            st.Garrison[nid] = Math.Max(0.5, st.Garrison[nid] * 0.80);
+                            st.Unrest[nid] = SimEngine.Clamp(st.Unrest.GetValueOrDefault(nid, 0) + 20, 0, 100);
+                            st.UndergroundNet ??= new();
+                            st.UndergroundProg ??= new();
+                            st.UndergroundNet[nid] = 0;
+                            st.UndergroundProg[nid] = 0.0;
+                            bool hasTouch = SimEngine.UnitsAt(st, nid, UnitDomain.Land).Count > 0 || st.Orders.Any(o => o.To == nid);
+                            string adjRoc = GameData.Nodes[nid].Adj.FirstOrDefault(a => st.Control.GetValueOrDefault(a) == Faction.ROC);
+                            if (hasTouch)
+                            {
+                                var m = SimEngine.AddUnit(st, "mil", nid, 85);
+                                m.Moved = true;
+                            }
+                            else if (adjRoc != null)
+                            {
+                                var m = SimEngine.AddUnit(st, "mil", adjRoc, 85);
+                                m.Moved = true;
+                            }
+                            SimEngine.AddMemoir(st, "敵後行動", $"{n.Name}敵後起義", $"引爆【{n.Name}】三級地下組織摧毀敵後補給與兵力部署。", 3);
+                            SimEngine.Log(st, $"★ 【{n.Name}】地下組織發動破襲起義，敵防區守軍劇震折損 20%！", "good");
+                        }
+                    },
+                    new() {
+                        Label = $"維持潛伏情報網（常時掌握{n.Name}精確情資）",
+                        Hint = $"永久開啟【{n.Name}】實時無迷霧情資（ugIntel）、全軍戰力 +2%；地下網調降為 Lv.2",
+                        FactionTag = "intel",
+                        Effect = st => {
+                            st.Flags["ugIntel_" + nid] = 1;
+                            st.BattleBonus += 0.02;
+                            st.UndergroundNet ??= new();
+                            st.UndergroundProg ??= new();
+                            st.UndergroundNet[nid] = 2;
+                            st.UndergroundProg[nid] = 0.0;
+                            SimEngine.Log(st, $"◈ 【{n.Name}】地下網轉入深度靜默偵察，敵軍番號與異動即時透明回傳。", "good");
+                        }
+                    },
+                    new() {
+                        Label = $"轉移核心骨幹向外滲透【{adjName}】",
+                        Hint = adjPrc != null
+                            ? $"【{adjName}】地下網躍升 +2 級；{n.Name}保留 Lv.1 聯絡點"
+                            : $"彙整全域滲透網路經驗（全軍戰力 +1%）；{n.Name}保留 Lv.1 聯絡點",
+                        FactionTag = "intel",
+                        Effect = st => {
+                            st.UndergroundNet ??= new();
+                            st.UndergroundProg ??= new();
+                            st.UndergroundNet[nid] = 1;
+                            st.UndergroundProg[nid] = 0.0;
+                            if (adjPrc != null)
+                            {
+                                st.UndergroundNet[adjPrc] = Math.Min(3, st.UndergroundNet.GetValueOrDefault(adjPrc, 0) + 2);
+                                SimEngine.Log(st, $"◈ 【{n.Name}】地下骨幹轉進【{adjName}】，當地組織躍升至 Lv.{st.UndergroundNet[adjPrc]}。", "good");
+                            }
+                            else
+                            {
+                                st.BattleBonus += 0.01;
+                                SimEngine.Log(st, $"◈ 【{n.Name}】地下骨幹完成全域經驗彙整（全軍戰力 +1%）。", "info");
+                            }
                         }
                     }
                 }
