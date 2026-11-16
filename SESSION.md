@@ -442,4 +442,19 @@ Release 建置 0 警告 0 錯誤。`--test` 退出碼 0，報告為全部通過�
 - 計畫全文：`OPTIMIZATION_PLAN.md`（同步至 `F:\DOC\misc\roc-grand-strategy-2d-game-20261110\`）。
 - 盤點證據：build 0 警告 0 錯誤（16:46 實跑）；`AssessPosture`/`FrontHeadline` grep 0 次，S1–S5 未實作；本檔 432–437 行為字面 `?` 損毀；git 僅 1 commit；無批次模擬工具。
 - 路線：P0 工程地基＋`--sim` 批次模擬 → P1 S1–S5 → P2 季節窗口/時代國策/光復區治理/參謀四派 → P3 作戰計畫與欺敵/敵後網路/中共戰略人格 → P4 變局劇本/回憶錄/新結局 → P5 平衡驗收。
-- 待使用者裁決：順序、派系是否全虛構、是否新增結局、首批系統。
+
+## 2026-11-16 — 整體優化與十大戰略機制（P0–P5）實作驗收完成
+
+- **使用者裁決與實施範圍**：分階段完成 P0 地基與 `--sim`、P1（`S1–S5` 態勢感知與比例縮放）、P2–P4（十大低微操高策略機制 `A–J`）與 P5 平衡調校與全自動驗證。參謀四派（`StaffFactions`）採全虛構幕僚長（雷振山、沈海平、顧青雲、林仲衡）；保留 `EventChoice.Stance` 並以獨立 `FactionTag` 支援派系歸屬；新增 `junta`、`fortress` 共 16 種結局；全新增UI維持嚴格 BMP 字元且不含「史實／架空」字樣。
+- **P5 平衡調整與實測發現（`SimEngine.cs`）**：
+  - 調整前初測（`--sim 5 --policy all --seed 1000`）發現 `rush1950` 於 `1952–1955` 即速推全國 26 省、`passive` 於 3/5 種子無作為卻因事件持續消耗 `PrcStab` 而墜入 `warlordP`。
+  - 根因修正（`SimEngine.cs`）：`PrcAi` 於國軍深入 2 省以上啟動全國緊急總動員預備兵力並自縱深抽調 28% 餘力補防前線、3 省以上降低反撲門檻（`3.0 -> 2.15`，誘敵深入學說 `1.90`）；`PrcUpdate` 穩定度向均衡點回復係數由 `0.08` 調升為 `0.22`。
+- **最終驗證結果（`--test` 與 `--sim`）**：
+  - `dotnet build -c Release --no-restore`：0 警告、0 錯誤。
+  - `國光：反攻大陸.exe --test`：`TEST_EXIT=0`，`1 / 2 / 3 / 4 / 4B / 5 / 5B / 5C / 5D / 5E / 5F` 全數 `[PASS]`，且無殘留 HTML 與非 BMP 代理字元。
+  - `國光：反攻大陸.exe --sim 5 --policy all --seed 1000 --out sim_final.csv`（20 局全數 `ZeroSixMonthStreaks = 0`）：
+    - `passive`：3× `status`（0 省）、2× `beachhead`（1 省），無 `warlordP`、無 `full`。
+    - `econ`：3× `armistice`（1980–1981，14–22 省）、1× `armistice`（2026，0 省）、1× `full`（1999，26 省）。
+    - `rush1950`：5× `full` 拉長至 `1959–2001`（不再 2–4 年速推）。
+    - `opportunist`：5× `split_ussr`（2026，17–25 省，北疆須應對蘇聯干涉）。
+- **清理與歸檔**：已清除 `bin\Release\net8.0-windows\` 內測試暫存檔，完整工作區已同步歸檔至 `F:\DOC\misc\roc-grand-strategy-2d-game-20261110\`。

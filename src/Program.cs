@@ -1345,6 +1345,228 @@ namespace RocGame
             }
             LogLine("[PASS] 5D. 公債單期額度提升(18% GDP)、自動發債/償債/經貿與 63 項科研分支 UI 驗證通過");
 
+            // 5E. S1–S5 態勢感知、破綻與戰機事件、全國比例折損驗證
+            {
+                // S1 & S3: 海空暴露偵測 + 增援嚴守 CheckMove 不作弊傳送
+                var s5e = SimEngine.NewGame(2001u);
+                s5e.Month = 3; // TotalMonths = 2
+                SimEngine.AssessPosture(s5e);
+                Assert(!string.IsNullOrEmpty(s5e.ExposedNodeId) && s5e.FrontHeadlineKind == "threat",
+                    "1950 初期南海 Z4 無海空掩護時應偵測到海空暴露態勢");
+
+                foreach (var u in SimEngine.UnitsAt(s5e, "TW", UnitDomain.Land)) u.Moved = true;
+                s5e.PendingEvents.Clear();
+                EventSystem.CheckDynamic(s5e);
+                Assert(s5e.PendingEvents.Count > 0 && s5e.PendingEvents[0].Id.StartsWith("dyn_posture_exp_"),
+                    "暴露態勢應觸發 dyn_posture_exp 動態事件");
+                int ordersBefore = s5e.Orders.Count;
+                EventSystem.ResolveChoice(s5e, 0);
+                Assert(s5e.Orders.Count == ordersBefore, "後方無可 CheckMove 部隊時暴露增援不應作弊瞬移");
+
+                // S1 & S4: 戰略窗口偵測 + 百分比折損與 2 個月登陸窗口加成
+                var sWin = SimEngine.NewGame(2003u);
+                sWin.Month = 3;
+                foreach (var z in GameData.ZoneIds)
+                {
+                    for (int k = 0; k < 4; k++)
+                    {
+                        SimEngine.AddUnit(sWin, "fleet", z, 100);
+                        SimEngine.AddUnit(sWin, "air", z, 100);
+                    }
+                }
+                SimEngine.AssessPosture(sWin);
+                Assert(string.IsNullOrEmpty(sWin.ExposedNodeId) && !string.IsNullOrEmpty(sWin.WindowTargetId) && sWin.FrontHeadlineKind == "window",
+                    "全海域具備海空優勢時應識別戰略窗口與目標節點");
+                string winZ = sWin.WindowZoneId;
+                string winTgt = sWin.WindowTargetId;
+                sWin.Garrison[winTgt] = 20.0;
+                double gx0 = sWin.Garrison["GX"] = 4.0;
+                EventSystem.ChipHeld(sWin, new[] { "GX" }, 0.10);
+                Assert(Math.Abs((gx0 - sWin.Garrison["GX"]) - 0.40) < 1e-6, "ChipHeld 應依現有兵力等比例削減 10%");
+                sWin.PendingEvents.Clear();
+                EventSystem.CheckDynamic(sWin);
+                Assert(sWin.PendingEvents.Count > 0 && sWin.PendingEvents[0].Id.StartsWith("dyn_posture_win_"),
+                    "窗口態勢應觸發 dyn_posture_win 戰機事件");
+                EventSystem.ResolveChoice(sWin, 0);
+                Assert(Math.Abs(sWin.Garrison[winTgt] - 18.0) < 1e-6, "破襲應對 20 師守軍造成精確 10%（2.0 師）折損");
+                Assert(sWin.GetFlag("winBonus_" + winZ) >= sWin.TotalMonths + 2, "破襲後應開啟 2 個月登陸窗口加成旗標");
+
+                // S5: 全國性穩定度衝擊 ShockPrc 依剩餘省分比例縮放
+                var sFull = SimEngine.NewGame(2004u);
+                var sSmall = SimEngine.NewGame(2004u);
+                foreach (var id in GameData.MainlandIds.Skip(2)) sSmall.Control[id] = Faction.ROC;
+                sFull.PrcStab = 60.0;
+                sSmall.PrcStab = 60.0;
+                EventSystem.ShockPrc(sFull, 15.0);
+                EventSystem.ShockPrc(sSmall, 15.0);
+                double dropFull = 60.0 - sFull.PrcStab;
+                double dropSmall = 60.0 - sSmall.PrcStab;
+                Assert(dropFull > dropSmall * 2.0 && sSmall.PrcStab > 50.0,
+                    $"ShockPrc 應依大陸剩餘省分比例縮放（26省降 {dropFull:F2}，2省降 {dropSmall:F2}）");
+            }
+            LogLine("[PASS] 5E. S1–S5 戰線態勢感知、破綻/戰機事件與比例折損驗證通過");
+
+            // 5F. 系統 A–J（季節、國策、光復治理、參謀四派、作戰計畫、地下網、敵學說、變數、回憶錄、16結局）驗證
+            {
+                // B. 季節與北疆嚴冬
+                Assert(SimEngine.GetSeasonPrepDelta(8, "Z3") == 3 && SimEngine.GetSeasonPrepDelta(5, "Z3") == -1,
+                    "颱風季應 +3 天、順風季應 -1 天登陸籌備");
+                var sB = SimEngine.NewGame(3001u);
+                sB.Control["HLJ"] = Faction.ROC;
+                sB.Garrison["HLJ"] = 0;
+                foreach (var gid in GameData.MainlandIds) sB.Garrison[gid] = 0;
+                var coldU = SimEngine.AddUnit(sB, "inf", "HLJ", 100);
+                sB.Year = 1952; sB.Month = 12; sB.Day = 31;
+                SimEngine.AdvanceDay(sB);
+                Assert(coldU.Str < 100.0, "12 月嚴冬應對北疆駐軍造成低溫損耗");
+
+                // A. 時代國策與期滿承諾（自動觸發於 1950/03/01，五年後 YearlyTick 結算並記入回憶錄）
+                var sA = SimEngine.NewGame(3002u);
+                for (int d = 0; d < 90 && (sA.Year == 1950 && sA.Month < 3); d++)
+                {
+                    if (sA.PendingEvents.Count > 0) EventSystem.ResolveChoice(sA, 0);
+                    SimEngine.AdvanceDay(sA);
+                }
+                if (sA.Year == 1950 && sA.Month == 3 && sA.Day == 1 && !sA.FiredEvents.Contains("era_dir_1950"))
+                    EventSystem.CheckEvents(sA);
+                Assert(sA.PendingEvents.Any(e => e.Id.StartsWith("era_dir_")), "1950/03/01 應觸發時代國策選擇");
+                while (sA.PendingEvents.Count > 0 && !sA.PendingEvents[0].Id.StartsWith("era_dir_"))
+                    EventSystem.ResolveChoice(sA, 0);
+                EventSystem.ResolveChoice(sA, 0);
+                Assert(!string.IsNullOrEmpty(sA.ActiveDirectiveId) && sA.Memoir.Count > 0, "選定國策後應記錄啟動與回憶錄");
+                sA.Year = sA.DirectiveEndYear; sA.Month = 12; sA.Day = 31;
+                int memBefore = sA.Memoir.Count;
+                SimEngine.AdvanceDay(sA);
+                Assert(string.IsNullOrEmpty(sA.ActiveDirectiveId) && sA.Memoir.Count > memBefore,
+                    "五年期滿跨年後應結算時代國策承諾並追加回憶錄");
+
+                // D. 光復區治理方針：Major 彈窗，一般省分自動沿用
+                var sD = SimEngine.NewGame(3003u);
+                sD.PendingEvents.Clear();
+                sD.Control["GD"] = Faction.ROC;
+                EventSystem.OnCapture(sD, "GD");
+                Assert(sD.PendingEvents.Any(e => e.Id == "lib_policy_GD"), "收復廣東重鎮應觸發三選一治理方針");
+                EventSystem.ResolveChoice(sD, 1); // 民政撫輯 civil
+                Assert(sD.LastLiberationPolicy == "civil" && sD.ProvincePolicy.GetValueOrDefault("GD") == "civil",
+                    "選擇民政撫輯應記錄廣東與預設治理方針");
+                sD.Control["GX"] = Faction.ROC;
+                EventSystem.OnCapture(sD, "GX");
+                Assert(!sD.PendingEvents.Any(e => e.Id == "lib_policy_GX") && sD.ProvincePolicy.GetValueOrDefault("GX") == "civil",
+                    "非 Major 省分應自動沿用上次光復治理方針不另彈窗");
+
+                // C. 參謀四派影響力、主導與 24 個月反彈
+                var sC = SimEngine.NewGame(3004u);
+                for (int k = 0; k < 5; k++)
+                    SimEngine.ApplyChoiceFactionShift(sC, new EventChoice { FactionTag = "intel" });
+                Assert(SimEngine.DominantStaffFaction(sC) == "intel", "連續偏向情報選項後情報派應為主導派系");
+                sC.Month = 3;
+                foreach (var z in GameData.ZoneIds) { SimEngine.AddUnit(sC, "fleet", z, 100); SimEngine.AddUnit(sC, "air", z, 100); }
+                sC.FactionLowMonths["econ"] = 24;
+                sC.PendingEvents.Clear();
+                string thC = EventSystem.AnalyzeFrontline(sC).Theater.ToString();
+                sC.Cooldowns[$"posture_exp_{thC}"] = 999;
+                sC.Cooldowns[$"posture_win_{thC}"] = 999;
+                EventSystem.CheckDynamic(sC);
+                Assert(sC.PendingEvents.Any(e => e.Id.StartsWith("dyn_faction_backlash_econ_")),
+                    "派系遭冷落滿 24 個月應觸發反彈事件");
+
+                // E. 作戰計畫與欺敵（僅手動優先目標兩棲整備觸發；戰後清空）
+                var sE1 = SimEngine.NewGame(3005u);
+                sE1.PriorityTargets.Add("FJ");
+                sE1.PendingEvents.Clear();
+                var twU = SimEngine.UnitsAt(sE1, "TW", UnitDomain.Land).Take(2).Select(u => u.Id).ToList();
+                var (movedE, errE) = SimEngine.AttackNow(sE1, twU, "FJ", manual: true);
+                Assert(movedE > 0 && string.IsNullOrEmpty(errE), "優先目標手動反攻應成功建立兩棲計畫");
+                Assert(sE1.PendingEvents.Any(e => e.Id.StartsWith("op_plan_FJ_")), "手動進攻優先登陸目標應彈出作戰計畫會議");
+                int reqBefore = sE1.Orders.First(o => o.To == "FJ").PrepRequired;
+                EventSystem.ResolveChoice(sE1, 0); // blitz
+                Assert(sE1.ActiveOpPlanKind == "blitz" && sE1.Orders.First(o => o.To == "FJ").PrepRequired <= reqBefore,
+                    "奇襲搶灘應設定 blitz 並縮減籌備天數");
+
+                var sE2 = SimEngine.NewGame(3005u);
+                sE2.PriorityTargets.Add("FJ");
+                sE2.PendingEvents.Clear();
+                SimEngine.AttackNow(sE2, SimEngine.UnitsAt(sE2, "TW", UnitDomain.Land).Take(2).Select(u => u.Id), "FJ", manual: true);
+                double garBeforeMethod = sE2.Garrison["FJ"];
+                EventSystem.ResolveChoice(sE2, 2); // methodical
+                Assert(sE2.ActiveOpPlanKind == "methodical" && sE2.Garrison["FJ"] < garBeforeMethod,
+                    "步步為營方案應先削弱目標守軍並設定 methodical");
+                SimEngine.AddUnit(sE2, "inf", "FJ", 100);
+                SimEngine.Battle(sE2, "FJ", true, new HashSet<int>());
+                Assert(string.IsNullOrEmpty(sE2.ActiveOpPlanKind) && string.IsNullOrEmpty(sE2.ActiveOpTargetId),
+                    "目標交戰結算後應清空當前作戰計畫狀態");
+
+                // F. 敵後滲透網 Lv.3 成熟與永久無迷霧情資
+                var sF = SimEngine.NewGame(3006u);
+                sF.Month = 3;
+                sF.PendingEvents.Clear();
+                foreach (var z in GameData.ZoneIds) { SimEngine.AddUnit(sF, "fleet", z, 100); SimEngine.AddUnit(sF, "air", z, 100); }
+                string thF = EventSystem.AnalyzeFrontline(sF).Theater.ToString();
+                sF.Cooldowns[$"posture_exp_{thF}"] = 999;
+                sF.Cooldowns[$"posture_win_{thF}"] = 999;
+                sF.UndergroundNet["FJ"] = 3;
+                EventSystem.CheckDynamic(sF);
+                Assert(sF.PendingEvents.Any(e => e.Id.StartsWith("ug_mature_FJ_")), "地下網達 Lv.3 應觸發成熟三選一事件");
+                EventSystem.ResolveChoice(sF, 1); // 維持潛伏情報網
+                Assert(sF.HasFlag("ugIntel_FJ") && SimEngine.HasIntel(sF, "FJ") && sF.UndergroundNet["FJ"] == 2,
+                    "選擇潛伏情報網應啟用常時無迷霧情資並降至 Lv.2");
+
+                // G. 共軍五年戰略學說輪替、情報迷霧揭露與 >= 2 省緊急總動員
+                var sG = SimEngine.NewGame(3007u);
+                Assert(sG.PrcDoctrine == "coastal_wall", "1950 初期共軍學說應為東南岸防重兵");
+                string descApprox = SimEngine.DescribePrcDoctrineIntel(sG);
+                Assert(descApprox.Contains("概估") && descApprox.Contains("或"), "無高階電偵或情報優勢時應只提供二選一概估");
+                SimEngine.GrantTech(sG, "black_cat");
+                string descExact = SimEngine.DescribePrcDoctrineIntel(sG);
+                Assert(descExact.Contains("確報") && descExact.Contains("東南岸防重兵"), "擁有黑貓中隊後應獲得精確學說確報");
+                sG.Year = 1952; sG.Month = 12; sG.Day = 31;
+                SimEngine.AdvanceDay(sG);
+                Assert(sG.Year == 1953 && sG.PrcDoctrine == "inland_lure", "1953 年應依五年週期輪替共軍戰略學說");
+                sG.Control["GX"] = Faction.ROC; sG.Control["YN"] = Faction.ROC;
+                sG.Garrison["GX"] = 0; sG.Garrison["YN"] = 0;
+                SimEngine.MonthlyTick(sG);
+                Assert(sG.HasFlag("prcMobWarned"), "國軍光復 2 省以上應觸發對岸全國緊急總動員體制");
+
+                // H. 自選開局變數（零選擇完全無擾動 vs 雙變數 +35% 積分加成）
+                var sH0a = SimEngine.NewGame(999u, false, null);
+                var sH0b = SimEngine.NewGame(999u, false, Array.Empty<string>());
+                Assert(Math.Abs(sH0a.UsRel - sH0b.UsRel) < 1e-9 && Math.Abs(sH0a.PrcStab - sH0b.PrcStab) < 1e-9
+                    && sH0a.ActiveMutators.Count == 0 && sH0b.ActiveMutators.Count == 0,
+                    "未選任何變數時開局數值必須與預設一般局完全一致");
+                var sH1 = SimEngine.NewGame(999u, false, new[] { "mut_aid_delayed", "mut_prc_harvest" });
+                Assert(sH1.ActiveMutators.Count == 2 && sH1.UsRel < sH0a.UsRel && sH1.PrcStab > sH0a.PrcStab,
+                    "啟用變數後應正確套用初期難度修正");
+                sH1.Gdp = sH0a.Gdp; sH1.Intl = sH0a.Intl; sH1.Morale = sH0a.Morale; sH1.BattlesWon = sH0a.BattlesWon;
+                int scBase = SimEngine.Score(sH0a), scMut = SimEngine.Score(sH1);
+                Assert(scMut > scBase, $"變數開局積分應顯著高於無變數基準（無={scBase}, 雙變數={scMut}）");
+
+                // I & J. 雙新結局 (junta / fortress) 與全新增字串無非 BMP 代理字元
+                var sJ1 = SimEngine.NewGame(4001u);
+                sJ1.Year = 2026;
+                sJ1.FactionInfluence["army"] = 85.0;
+                sJ1.Morale = 30.0;
+                SimEngine.CheckEnd(sJ1);
+                Assert(sJ1.Over?.Key == "junta", "單一派系 >= 80 且民心 < 40 應於終戰達成 junta 強人軍政結局");
+
+                var sJ2 = SimEngine.NewGame(4002u);
+                sJ2.Year = 2026;
+                SimEngine.CheckEnd(sJ2);
+                Assert(sJ2.Over?.Key == "fortress", "未失守任何離島且光復省數為 0 應於終戰達成 fortress 金馬鐵壁結局");
+
+                var sJ3 = SimEngine.NewGame(4003u);
+                sJ3.Flags["lostAnyIsland"] = 1;
+                sJ3.Year = 2026;
+                SimEngine.CheckEnd(sJ3);
+                Assert(sJ3.Over?.Key != "fortress", "曾失守過離島者不應觸發 fortress 金馬鐵壁結局");
+
+                bool anySurrogate = GameData.Endings.Values.Any(e => (e.Title + e.Text + e.Group).Any(char.IsSurrogate))
+                    || GameData.Mutators.Values.Any(m => (m.Title + m.Desc).Any(char.IsSurrogate))
+                    || SimEngine.StaffFactions.Any(sp => (sp.Name + sp.Chief + sp.BonusDesc).Any(char.IsSurrogate))
+                    || SimEngine.PrcDoctrines.Any(d => (d.Title + d.EffectDesc).Any(char.IsSurrogate));
+                Assert(!anySurrogate, "新增結局、變數、派系與學說文字不應包含非 BMP 代理字元");
+            }
+            LogLine("[PASS] 5F. 系統 A–J 全數十項自創戰略機制與 16 結局驗證通過");
+
             // 6. 確認工作區無任何 HTML 檔案
             var htmlFiles = Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, "*.html", SearchOption.AllDirectories);
             Assert(htmlFiles.Length == 0, "輸出目錄不應存在任何 HTML 檔案");

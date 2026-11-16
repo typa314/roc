@@ -3199,6 +3199,33 @@ namespace RocGame
             double reinf = (10.0 + (s.Year - 1950) * 0.18) * PrcStabFactor(s) * s.PrcReinfMod
                          * (s.Techs.Contains("tienma") ? 0.75 : 1.0) * (1.0 - 0.5 * s.PrcSovTension) * (1.0 - 0.6 * PrcLostIndustry(s))
                          * mobScale * docReinfMult * mutHarvestMult * dt;
+            if (heldCount >= 2)
+            {
+                reinf += (24.0 + Math.Min(48.0, heldCount * 7.0)) * PrcStabFactor(s) * (1.0 - 0.45 * PrcLostIndustry(s)) * dt;
+                // 國軍深入兩省以上時，內地縱深守軍緊急抽調多餘預備隊馳援前線隣接省區
+                var prcFrontPool = GameData.MainlandIds
+                    .Where(id => s.Control[id] == Faction.PRC && GameData.Nodes[id].Adj.Any(a => s.Control[a] == Faction.ROC || UnitsAt(s, a, UnitDomain.Land).Count > 0))
+                    .OrderBy(id => s.Garrison[id])
+                    .ToList();
+                if (prcFrontPool.Count > 0)
+                {
+                    int fIdx = 0;
+                    foreach (var rearId in GameData.MainlandIds)
+                    {
+                        if (s.Control[rearId] != Faction.PRC) continue;
+                        if (prcFrontPool.Contains(rearId)) continue;
+                        double spare = Math.Max(0, s.Garrison[rearId] - NominalGarrison(s, rearId) * 0.45) * 0.28;
+                        if (spare > 0.15)
+                        {
+                            s.Garrison[rearId] -= spare;
+                            string recvId = prcFrontPool[fIdx % prcFrontPool.Count];
+                            s.Garrison[recvId] += spare;
+                            rep.PrcMoves.Add(new EnemyMoveRecord { From = rearId, To = recvId });
+                            fIdx++;
+                        }
+                    }
+                }
+            }
 
             foreach (var nid in GameData.MainlandIds)
             {
@@ -3395,7 +3422,10 @@ namespace RocGame
 
                 double committedPrcPower = EnemyPowerAt(s, target, Math.Max(0, s.Garrison[target]), defending: false)
                                          * (1.0 + 0.6 * (1.0 - air));
-                double ratioNeed = s.PrcDoctrine == "inland_lure" ? 2.45 : 3.0;
+                int mobHeld = HeldMainland(s).Count;
+                double ratioNeed = mobHeld >= 3
+                    ? (s.PrcDoctrine == "inland_lure" ? 1.90 : 2.15)
+                    : (s.PrcDoctrine == "inland_lure" ? 2.45 : 3.0);
                 double forceNeeded = (rocPower * ratioNeed - committedPrcPower) / prcPowerPerDivision;
                 // Count both armies' combat power. Existing PRC troops already attacking this province reduce
                 // the new force needed; require a 3:1 effective-power advantage before committing more troops.
@@ -3491,7 +3521,7 @@ namespace RocGame
             bool cult = s.Techs.Contains("cultural_psy");
             bool relief = s.Techs.Contains("mainland_relief");
             bool kinHorn = s.Techs.Contains("kinmen_horn");
-            s.PrcStab += ((target - s.PrcStab) * 0.08 - lostCount * 1.6 - (radio ? 0.45 : 0.0) - (cyber ? 0.35 : 0.0) - (cult ? 0.20 : 0.0)) * dt;
+            s.PrcStab += ((target - s.PrcStab) * 0.22 - lostCount * 1.6 - (radio ? 0.45 : 0.0) - (cyber ? 0.35 : 0.0) - (cult ? 0.20 : 0.0)) * dt;
             if (s.PrcDoctrine == "internal_purge")
                 s.PrcStab += 0.35 * dt * 12.0;
             s.PrcGdpMod += (1.0 - s.PrcGdpMod) * 0.06 * dt;
