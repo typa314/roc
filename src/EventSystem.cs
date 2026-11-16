@@ -1202,6 +1202,102 @@ namespace RocGame
                 d.Moved = true;
                 SimEngine.Log(s, $"★ {n.Name}共軍殘部陣前起義，整編為 1 支投誠部隊！", "good");
             }
+
+            // 系統 D：光復區治理方針（Major 重鎮彈三選一，一般省分沿用上次選擇）
+            s.ProvincePolicy ??= new();
+            if (n.Major && !s.FiredEvents.Contains($"lib_policy_{nid}"))
+            {
+                s.FiredEvents.Add($"lib_policy_{nid}");
+                s.PendingEvents.Add(BuildLiberationPolicyEvent(s, nid, n));
+            }
+            else
+            {
+                ApplyInheritedLiberationPolicy(s, nid, n);
+            }
+        }
+
+        private static GameEvent BuildLiberationPolicyEvent(GameState s, string nid, NodeDef n)
+        {
+            return new GameEvent
+            {
+                Id = $"lib_policy_{nid}",
+                Year = s.Year, Month = s.Month, Day = s.Day, Tag = "光復治理",
+                Title = $"光復重鎮【{n.Name}（{n.City}）】治理方針",
+                Desc = $"王師克復戰略重鎮【{n.Name}】，地方急須建立軍政秩序。統帥部須裁示採用軍事管制就地徵補、推行民政撫輯恢復生產，或委任地方鄉紳武裝綏靖自治。",
+                Choices = new List<EventChoice>
+                {
+                    new() {
+                        Label = "實施軍事管制，就地徵調壯丁與軍需物資",
+                        Hint = $"兵源 +2.5、補給 +6、{n.Name}動盪 +12；後續一般光復省分將沿用軍事管制",
+                        FactionTag = "army",
+                        Effect = st => {
+                            st.Manpower += 2.5;
+                            st.Supply += 6;
+                            st.Unrest[nid] = SimEngine.Clamp(st.Unrest.GetValueOrDefault(nid, 0) + 12, 0, 100);
+                            st.LastLiberationPolicy = "military";
+                            st.ProvincePolicy[nid] = "military";
+                            SimEngine.AddMemoir(st, "光復治理", $"軍事管制【{n.Name}】", "採行戰時軍管就地徵募，全力支應前線推進。", 2);
+                            SimEngine.Log(st, $"【{n.Name}】實施軍事管制，完成兵源與軍需徵調（後續一般省分沿用此方針）。", "good");
+                        }
+                    },
+                    new() {
+                        Label = "推動民政重建，撫輯流亡並減免田賦恢復工商",
+                        Hint = $"民心 +5、補給 -5、{n.Name}動盪歸零且工業歲入 +25%；後續一般省分沿用民政重建",
+                        FactionTag = "econ",
+                        Effect = st => {
+                            st.Morale += 5;
+                            st.Supply = Math.Max(0, st.Supply - 5);
+                            st.Unrest[nid] = 0;
+                            st.LastLiberationPolicy = "civil";
+                            st.ProvincePolicy[nid] = "civil";
+                            SimEngine.AddMemoir(st, "光復治理", $"民政重建【{n.Name}】", "減免賦稅安撫地方，厚植光復區長期稅收與民心。", 2);
+                            SimEngine.Log(st, $"【{n.Name}】推動民政重建，民間迅速安定並恢復稅賦生產。", "good");
+                        }
+                    },
+                    new() {
+                        Label = "委任地方綏靖自治，收編保甲武裝協防省境",
+                        Hint = $"於{n.Name}編成 1 支地方民兵（戰力 85%）、軍費減負；但地方割據風險 +1 級",
+                        FactionTag = "intel",
+                        Effect = st => {
+                            if (SimEngine.UnitsAt(st, nid, UnitDomain.Land).Count(u => u.Type == "mil") < 3)
+                                SimEngine.AddUnit(st, "mil", nid, 85);
+                            st.Flags["warlordRisk"] = st.GetFlag("warlordRisk") + 1;
+                            st.LastLiberationPolicy = "autonomy";
+                            st.ProvincePolicy[nid] = "autonomy";
+                            SimEngine.AddMemoir(st, "光復治理", $"綏靖自治【{n.Name}】", "授權地方武裝自治省力省餉，同時埋下藩鎮自主隱患。", 2);
+                            SimEngine.Log(st, $"【{n.Name}】採行地方綏靖自治並編成民兵協防，省中央經費但地方自主抬頭。", "");
+                        }
+                    }
+                }
+            };
+        }
+
+        private static void ApplyInheritedLiberationPolicy(GameState s, string nid, NodeDef n)
+        {
+            string pol = string.IsNullOrEmpty(s.LastLiberationPolicy) ? "civil" : s.LastLiberationPolicy;
+            s.ProvincePolicy[nid] = pol;
+            if (pol == "military")
+            {
+                s.Manpower += 1.2;
+                s.Supply += 3;
+                s.Unrest[nid] = SimEngine.Clamp(s.Unrest.GetValueOrDefault(nid, 0) + 6, 0, 100);
+                SimEngine.Log(s, $"【{n.Name}】沿用軍事管制方針（兵源 +1.2、補給 +3）。", "");
+            }
+            else if (pol == "autonomy")
+            {
+                if (SimEngine.UnitsAt(s, nid, UnitDomain.Land).Count(u => u.Type == "mil") < 3)
+                {
+                    var mu = SimEngine.AddUnit(s, "mil", nid, 75);
+                    mu.Moved = true;
+                }
+                SimEngine.Log(s, $"【{n.Name}】沿用地方綏靖方針（編成地方民兵協防）。", "");
+            }
+            else
+            {
+                s.Morale += 2;
+                s.Unrest[nid] = 0;
+                SimEngine.Log(s, $"【{n.Name}】沿用民政重建方針（民心 +2、動盪平息）。", "");
+            }
         }
 
         static GameEvent PrepareEvent(GameState s, GameEvent ev)
@@ -1250,6 +1346,133 @@ namespace RocGame
                     s.PendingEvents.Add(PrepareEvent(s, ev));
                 }
             }
+
+            // 系統 A：每五年時代國策（1950/03/01 起，後續 1955/01/01..2020/01/01）
+            bool dirDue = s.Day == 1 && ((s.Year == 1950 && s.Month == 3) || (s.Year >= 1955 && s.Year <= 2020 && (s.Year - 1950) % 5 == 0 && s.Month == 1));
+            string dirKey = $"era_dir_{s.Year}";
+            if (dirDue && !s.FiredEvents.Contains(dirKey))
+            {
+                s.FiredEvents.Add(dirKey);
+                s.PendingEvents.Add(BuildEraDirectiveEvent(s));
+            }
+        }
+
+        public static GameEvent BuildEraDirectiveEvent(GameState s)
+        {
+            var ctx = AnalyzeFrontline(s);
+            int endY = s.Year == 1950 ? 1955 : Math.Min(GameData.EndYear, s.Year + 5);
+
+            EventChoice MakeDirChoice(string id, string name, string label, string hint, string factionTag, Action<GameState> onPick) => new()
+            {
+                Label = label,
+                Hint = hint,
+                FactionTag = factionTag,
+                Effect = st =>
+                {
+                    st.ActiveDirectiveId = id;
+                    st.ActiveDirectiveName = name;
+                    st.DirectiveStartYear = st.Year;
+                    st.DirectiveEndYear = endY;
+                    st.DirectiveBaselineGdp = st.Gdp;
+                    st.DirectiveBaselineHeld = SimEngine.HeldMainland(st).Count;
+                    st.Flags["dirUssrBase"] = SimEngine.UssrNodes(st).Count;
+                    onPick?.Invoke(st);
+                    SimEngine.AddMemoir(st, "時代國策", $"確立【{name}】", $"{st.Year}–{endY} 年中樞施政總綱。", 3);
+                    SimEngine.Log(st, $"★ 中樞拍板 {st.Year}–{endY} 時代國策：【{name}】。", "big");
+                }
+            };
+
+            List<EventChoice> choices;
+            string subTitle;
+            if (ctx.OnlyUssrRemains)
+            {
+                subTitle = "北疆塞外抗俄階段";
+                choices = new List<EventChoice>
+                {
+                    MakeDirChoice("dir_drive_ussr", "還我北疆・塞外決戰",
+                        "確立國策【還我北疆・塞外決戰】：全力破敵逐俄",
+                        $"未來 {endY - s.Year} 年：對俄地面作戰 +10%、月耗補給 0.2｜五年承諾：收復至少 1 個俄占省分",
+                        "army", null),
+                    MakeDirChoice("dir_allied_ring", "聯美制俄・國際施壓",
+                        "確立國策【聯美制俄・國際施壓】：外交孤立莫斯科",
+                        $"未來 {endY - s.Year} 年：每年國際地位 +1、美國關係 +1｜五年承諾：期滿美國關係 ≥ 65 且國際地位 ≥ 60",
+                        "econ", null),
+                    MakeDirChoice("dir_border_guerrilla", "塞外義軍・斷敵鐵道",
+                        "確立國策【塞外義軍・斷敵鐵道】：消耗俄軍遠東補保",
+                        $"未來 {endY - s.Year} 年：北疆敵區每月守軍衰減且動盪上升｜五年承諾：俄占減至 ≤ 1 省或光復 ≥ 24 省",
+                        "intel", null)
+                };
+            }
+            else if (ctx.HeldMainland.Count >= 1)
+            {
+                subTitle = $"大陸反攻推進階段（已光復 {ctx.HeldMainland.Count} 省）";
+                choices = new List<EventChoice>
+                {
+                    MakeDirChoice("dir_north_expedition", "王師北定・主力決戰",
+                        "確立國策【王師北定・主力決戰】：集中資源擴張戰果",
+                        $"未來 {endY - s.Year} 年：全軍地面攻防 +8%、軍費維持 +8%｜五年承諾：再光復 ≥ 3 省或克復河北",
+                        "army", null),
+                    MakeDirChoice("dir_pacify_rear", "三分軍事・七分政治",
+                        "確立國策【三分軍事・七分政治】：安撫後方消弭割據",
+                        $"未來 {endY - s.Year} 年：光復省動盪下降、民心緩升、微幅動搖中共｜五年承諾：民心 ≥ 60 且無藩鎮割據風險",
+                        "intel", null),
+                    MakeDirChoice("dir_port_corridor", "海運動脈・以港養戰",
+                        "確立國策【海運動脈・以港養戰】：打通沿海吞吐運補",
+                        $"未來 {endY - s.Year} 年：兩棲運力 +2 師、海外吞吐 +3、月補給 +0.5｜五年承諾：握有 ≥ 2 座大陸港口且補給率 ≥ 85%",
+                        "navair", null)
+                };
+            }
+            else if (s.Year >= 1970)
+            {
+                subTitle = "科技經建與台海對峙階段";
+                choices = new List<EventChoice>
+                {
+                    MakeDirChoice("dir_silicon_shield", "科技立國・矽盾防衛",
+                        "確立國策【科技立國・矽盾防衛】：傾力升級科研與經濟",
+                        $"未來 {endY - s.Year} 年：科研產出 +15%、GDP 成長 +10%、軍費維持 +5%｜五年承諾：GDP 達現值 ×1.35",
+                        "econ", null),
+                    MakeDirChoice("dir_asymmetric", "不對稱重層嚇阻",
+                        "確立國策【不對稱重層嚇阻】：強化海空與防空拒止網",
+                        $"未來 {endY - s.Year} 年：海空戰力 +10%、GDP 成長 -4%｜五年承諾：保衛本島且 GDP 達現值 ×1.15",
+                        "navair", null),
+                    MakeDirChoice("dir_cultural_wave", "台灣經驗・和平演變",
+                        "確立國策【台灣經驗・和平演變】：擴大廣播破網與國際聲望",
+                        $"未來 {endY - s.Year} 年：持續動搖對岸穩定與國際曝光｜五年承諾：國際地位 ≥ 55 或對岸穩定度 < 55",
+                        "intel", null)
+                };
+            }
+            else
+            {
+                subTitle = "固本整軍與反攻窗口期";
+                choices = new List<EventChoice>
+                {
+                    MakeDirChoice("dir_build_taiwan", "生聚教訓・建設台灣",
+                        "確立國策【生聚教訓・建設台灣】：厚植農工財經底座",
+                        $"未來 {endY - s.Year} 年：GDP 成長 +15%、軍費維持 +6%｜五年承諾：期滿台灣 GDP 達現值 ×1.30",
+                        "econ", null),
+                    MakeDirChoice("dir_fort_islands", "固守外島・海空拒止",
+                        "確立國策【固守外島・海空拒止】：構築金馬澎堡壘與制海傘",
+                        $"未來 {endY - s.Year} 年：外島工事即時強化、海空戰力 +8%、GDP 成長 -5%｜五年承諾：保住至少 4 座島嶼據點",
+                        "navair", st =>
+                        {
+                            foreach (var iid in new[] { "KM", "MZ", "PH" })
+                                if (st.Control.GetValueOrDefault(iid) == Faction.ROC) SimEngine.IncreaseFortification(st, iid);
+                        }),
+                    MakeDirChoice("dir_prep_counter", "一年準備・兩年反攻",
+                        "確立國策【一年準備・兩年反攻】：優先動員兵源準備渡海",
+                        $"未來 {endY - s.Year} 年：兵源恢復 +30%、登陸戰力 +8%、未登陸前月民心 -0.15｜五年承諾：期滿前光復 ≥ 1 省",
+                        "army", null)
+                };
+            }
+
+            return new GameEvent
+            {
+                Id = $"era_dir_{s.Year}",
+                Year = s.Year, Month = s.Month, Day = s.Day, Tag = "時代國策",
+                Title = $"{s.Year}–{endY} 年中樞大政方針抉擇（{subTitle}）",
+                Desc = $"時序邁入 {s.Year} 年，統帥部須拍板未來 {endY - s.Year} 年的國家大政總綱。國策一經定案即鎖定施行至 {endY} 年，期滿依承諾成敗賞罰威信！",
+                Choices = choices
+            };
         }
 
         public static void CheckEvents(GameState s)
@@ -1267,7 +1490,10 @@ namespace RocGame
             s.PendingEvents.RemoveAt(0);
             if (choiceIndex >= 0 && choiceIndex < ev.Choices.Count)
             {
-                ev.Choices[choiceIndex].Effect?.Invoke(s);
+                var chosen = ev.Choices[choiceIndex];
+                chosen.Effect?.Invoke(s);
+                if (ev.Choices.Count > 1 && !ev.Id.StartsWith("dyn_faction_backlash_"))
+                    SimEngine.ApplyChoiceFactionShift(s, chosen);
             }
             SimEngine.StepResearch(s, 0, chargeDailySurcharge: false);
             SimEngine.Normalize(s);

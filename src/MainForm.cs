@@ -1504,9 +1504,10 @@ namespace RocGame
             string dateTxt = $"{State.Year}年{State.Month:D2}月{State.Day:D2}日";
             g.DrawString(dateTxt, dateF, mainBr, 15, 31);
             var dateSz = g.MeasureString(dateTxt, dateF);
-            g.DrawString(clockStatus, pillLblF, clkBr, 15 + dateSz.Width + 5, 32);
+            string seasonTxt = SimEngine.GetSeasonLabel(State.Month);
+            g.DrawString($"{clockStatus} · {seasonTxt}", pillLblF, clkBr, 15 + dateSz.Width + 4, 32);
 
-            int x = 202;
+            int x = 214;
             int rightLimit = _btnSave.Left - 14;
 
             var b = SimEngine.Budget(State);
@@ -1628,12 +1629,15 @@ namespace RocGame
             {
                 var b = SimEngine.Budget(State);
                 string taxName = State.Tax == "low" ? "輕稅 12%" : State.Tax == "high" ? "重稅 20%" : "標準 16%";
+                string dirLine = !string.IsNullOrEmpty(State.ActiveDirectiveName)
+                    ? $"\n時代國策：{State.ActiveDirectiveName}（至 {State.DirectiveEndYear} 年）"
+                    : "";
                 _hudTooltipTitle.Text = "◆ 國庫財政與經濟明細";
                 _hudTooltipBody.Text =
                     $"年度歲入：+${b.income:F2} 億（稅率：{taxName}）\n" +
                     $"三軍維持：-${b.upkeep:F2} 億  |  研發債息：-${(b.research + b.interest):F2} 億\n" +
                     $"戰爭公債：單期 ${SimEngine.BondAmount(State):F2} 億（佔 GDP 18% · 仿美 War Bonds）\n" +
-                    $"累計公債：${State.Debt:F1} 億  |  經濟乘數：{State.EconMult * 100:F0}%  |  物價：×{SimEngine.PriceIndex(State):F1}";
+                    $"累計公債：${State.Debt:F1} 億  |  經濟乘數：{State.EconMult * 100:F0}%  |  物價：×{SimEngine.PriceIndex(State):F1}{dirLine}";
                 _hudTooltipCard.Location = new Point((int)_hudRectTreasury.X, 8);
             }
             else if (_hoverHudKey == "stability")
@@ -2811,7 +2815,9 @@ namespace RocGame
                             double seaPct = string.IsNullOrEmpty(chk.zone) ? 100.0 : SimEngine.SeaSup(State, chk.zone) * 100.0;
                             string oddsStr = reachable.TryGetValue(n.Id, out var rInfo) ? $" · 預估：{rInfo.oddsLabel}" : "";
                             string portHint = n.Port ? " · ⚓奪港要衝" : "";
-                            moveHint = $"{actPrefix}建立兩棲登陸（籌備 {chk.prepDays} 天＋航渡 {chk.totalDays} 天 · 制海 {seaPct:F0}%{(seaPct >= 50.0 ? "✓" : "<50%待制海")}{portHint}{oddsStr}）";
+                            int sDelta = SimEngine.GetSeasonPrepDelta(State.Month, chk.zone);
+                            string seasonHint = sDelta != 0 ? $"({SimEngine.GetSeasonLabel(State.Month)}{(sDelta > 0 ? "+" : "")}{sDelta}天)" : "";
+                            moveHint = $"{actPrefix}建立兩棲登陸（籌備 {chk.prepDays} 天{seasonHint}＋航渡 {chk.totalDays} 天 · 制海 {seaPct:F0}%{(seaPct >= 50.0 ? "✓" : "<50%待制海")}{portHint}{oddsStr}）";
                         }
                         else
                         {
@@ -3676,8 +3682,68 @@ namespace RocGame
 
         private void RenderIntelDrawer(int cw)
         {
-            _drawerTitleLbl.Text = "★ 統帥部戰報與歷史電文";
+            _drawerTitleLbl.Text = "★ 統帥部戰報與參謀派系";
             int y = 4;
+
+            var councilCard = new BufferedPanel
+            {
+                Location = new Point(4, y),
+                Size = new Size(cw, 130),
+                BackColor = BgCard
+            };
+            councilCard.Paint += (_, pe) =>
+            {
+                var g = pe.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+                WarGdi.DrawPlaqueFrame(g, new RectangleF(0.5f, 0.5f, councilCard.Width - 2f, councilCard.Height - 2f), 5f, BgCard, BorderCol, Color.FromArgb(46, 40, 31));
+                using var hdrF = new Font("Microsoft JhengHei UI", 8.6f, FontStyle.Bold);
+                using var subF = new Font("Microsoft JhengHei UI", 7.8f);
+                using var goldBr = new SolidBrush(GoldCol);
+                using var subBr = new SolidBrush(TextSub);
+                using var txtBr = new SolidBrush(TextMain);
+
+                string domKey = SimEngine.DominantStaffFaction(State);
+                var domSpec = SimEngine.StaffFactions.FirstOrDefault(x => x.Key == domKey);
+                string hdrText = string.IsNullOrEmpty(domKey)
+                    ? "◆ 參謀本部四派均衡（任一派系 ≥ 55 取得主導加成）"
+                    : $"◆ 主導：{domSpec.Name}（{domSpec.BonusDesc}）";
+                g.DrawString(hdrText, hdrF, goldBr, 10, 7);
+
+                if (!string.IsNullOrEmpty(State.ActiveDirectiveName))
+                    g.DrawString($"國策：{State.ActiveDirectiveName}（至 {State.DirectiveEndYear} 年）", subF, subBr, 10, 26);
+                else
+                    g.DrawString("幕僚長意見隨事件與國策抉擇消長；冷落滿兩年將引發反彈", subF, subBr, 10, 26);
+
+                Color[] fCols =
+                {
+                    Color.FromArgb(196, 138, 72),
+                    Color.FromArgb(88, 152, 206),
+                    Color.FromArgb(164, 108, 192),
+                    Color.FromArgb(98, 176, 118)
+                };
+                int rowY = 47;
+                for (int fi = 0; fi < SimEngine.StaffFactions.Length; fi++)
+                {
+                    var sp = SimEngine.StaffFactions[fi];
+                    double val = State.FactionInfluence?.GetValueOrDefault(sp.Key, 50.0) ?? 50.0;
+                    bool isDom = sp.Key == domKey;
+                    g.DrawString(isDom ? $"★{sp.Name}" : $"  {sp.Name}", subF, isDom ? goldBr : txtBr, 8, rowY);
+                    var barR = new RectangleF(84, rowY + 3, Math.Max(60, councilCard.Width - 134), 9);
+                    using (var bgBr = new SolidBrush(Color.FromArgb(24, 21, 17)))
+                    using (var fillBr = new SolidBrush(fCols[fi]))
+                    using (var rimPen = new Pen(isDom ? GoldCol : BorderCol, 0.9f))
+                    {
+                        g.FillRectangle(bgBr, barR);
+                        g.FillRectangle(fillBr, barR.X, barR.Y, (float)(barR.Width * Math.Clamp(val / 100.0, 0.0, 1.0)), barR.Height);
+                        g.DrawRectangle(rimPen, barR.X, barR.Y, barR.Width, barR.Height);
+                    }
+                    g.DrawString($"{val:F0}", subF, val < 15 ? new SolidBrush(BadRed) : subBr, barR.Right + 6, rowY);
+                    rowY += 19;
+                }
+            };
+            _drawerScrollBody.Controls.Add(councilCard);
+            y += 136;
 
             using var mG = CreateGraphics();
             using var fLog = new Font("Microsoft JhengHei UI", 8.8f);

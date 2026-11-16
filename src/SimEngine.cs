@@ -47,6 +47,15 @@ namespace RocGame
         public string Kind { get; set; } // "", "good", "bad", "big"
     }
 
+    public class MemoirEntry
+    {
+        public string Date { get; set; }
+        public string Category { get; set; }
+        public string Title { get; set; }
+        public string Detail { get; set; }
+        public int Weight { get; set; } = 1;
+    }
+
     public class HistPoint
     {
         public int Year { get; set; }
@@ -237,6 +246,31 @@ namespace RocGame
         public string ExposedNodeId { get; set; } = "";
         public string WindowZoneId { get; set; } = "";
         public string WindowTargetId { get; set; } = "";
+
+        // 時代國策 (A)
+        public string ActiveDirectiveId { get; set; } = "";
+        public string ActiveDirectiveName { get; set; } = "";
+        public int DirectiveStartYear { get; set; } = 0;
+        public int DirectiveEndYear { get; set; } = 0;
+        public double DirectiveBaselineGdp { get; set; } = 14.0;
+        public int DirectiveBaselineHeld { get; set; } = 0;
+
+        // 光復區治理 (D)
+        public string LastLiberationPolicy { get; set; } = "civil";
+        public Dictionary<string, string> ProvincePolicy { get; set; } = new();
+
+        // 參謀本部四派 (C)
+        public Dictionary<string, double> FactionInfluence { get; set; } = new()
+        {
+            ["army"] = 50.0, ["navair"] = 50.0, ["intel"] = 50.0, ["econ"] = 50.0
+        };
+        public Dictionary<string, int> FactionLowMonths { get; set; } = new()
+        {
+            ["army"] = 0, ["navair"] = 0, ["intel"] = 0, ["econ"] = 0
+        };
+
+        // 統帥回憶錄 (I)
+        public List<MemoirEntry> Memoir { get; set; } = new();
 
         public int GetFlag(string k) => Flags.TryGetValue(k, out int v) ? v : 0;
         public bool HasFlag(string k) => GetFlag(k) > 0;
@@ -432,13 +466,19 @@ namespace RocGame
         public static double RocSea(GameState s, string z)
         {
             double p = UnitsAt(s, z, UnitDomain.Sea).Sum(u => GameData.UnitTypes["fleet"].Power * (u.Str / 100.0));
-            return p * (1.0 + 0.3 * (s.NavyTech - 1.0));
+            double mult = (HasDirective(s, "dir_fort_islands") ? 1.08 : 1.0)
+                        * (HasDirective(s, "dir_asymmetric") ? 1.10 : 1.0)
+                        * (DominantStaffFaction(s) == "navair" ? 1.06 : 1.0);
+            return p * (1.0 + 0.3 * (s.NavyTech - 1.0)) * mult;
         }
 
         public static double RocAir(GameState s, string z)
         {
             double p = UnitsAt(s, z, UnitDomain.Air).Sum(u => GameData.UnitTypes["air"].Power * (u.Str / 100.0));
-            return p * (1.0 + 0.3 * (s.AirTech - 1.0));
+            double mult = (HasDirective(s, "dir_fort_islands") ? 1.08 : 1.0)
+                        * (HasDirective(s, "dir_asymmetric") ? 1.10 : 1.0)
+                        * (DominantStaffFaction(s) == "navair" ? 1.06 : 1.0);
+            return p * (1.0 + 0.3 * (s.AirTech - 1.0)) * mult;
         }
 
         public static double SeaSup(GameState s, string z)
@@ -716,11 +756,14 @@ namespace RocGame
 
         public static double FogError(GameState s)
         {
-            if (s.Techs.Contains("sat_elint") || s.Techs.Contains("formosat_recon")) return 0.0;
-            if (s.Techs.Contains("black_cat")) return 0.06;
-            if (s.Techs.Contains("comint")) return s.Techs.Contains("p2v_patrol") ? 0.09 : 0.12;
-            if (s.Techs.Contains("recon_coast")) return s.Techs.Contains("p2v_patrol") ? 0.14 : 0.18;
-            return s.Techs.Contains("p2v_patrol") ? 0.24 : 0.32;
+            double err;
+            if (s.Techs.Contains("sat_elint") || s.Techs.Contains("formosat_recon")) err = 0.0;
+            else if (s.Techs.Contains("black_cat")) err = 0.06;
+            else if (s.Techs.Contains("comint")) err = s.Techs.Contains("p2v_patrol") ? 0.09 : 0.12;
+            else if (s.Techs.Contains("recon_coast")) err = s.Techs.Contains("p2v_patrol") ? 0.14 : 0.18;
+            else err = s.Techs.Contains("p2v_patrol") ? 0.24 : 0.32;
+            if (DominantStaffFaction(s) == "intel") err = Math.Max(0.0, err - 0.03);
+            return err;
         }
 
         public static void RollFog(GameState s)
@@ -755,10 +798,149 @@ namespace RocGame
             return (Math.Max(0.0, g * (1.0 + s.Fog[id])), false);
         }
 
+        // ---------- 季節、國策與參謀四派輔助 ----------
+        public static string GetSeasonKind(int month) => month switch
+        {
+            7 or 8 or 9 => "typhoon",
+            4 or 5 or 10 or 11 => "calm",
+            12 or 1 or 2 => "winter",
+            _ => "normal"
+        };
+
+        public static string GetSeasonLabel(int month) => GetSeasonKind(month) switch
+        {
+            "typhoon" => "▲颱風季",
+            "calm" => "⚓順風季",
+            "winter" => "❄嚴冬",
+            _ => "○平季"
+        };
+
+        public static int GetSeasonPrepDelta(int month, string zone)
+        {
+            bool southernSea = string.IsNullOrEmpty(zone) || zone is "Z2" or "Z3" or "Z4";
+            return month switch
+            {
+                7 or 8 or 9 => southernSea ? 3 : 1,
+                4 or 5 or 10 or 11 => -1,
+                _ => 0
+            };
+        }
+
+        public static bool HasDirective(GameState s, string id)
+            => s != null && !string.IsNullOrEmpty(id) && s.ActiveDirectiveId == id && s.Year < s.DirectiveEndYear;
+
+        public static void AddMemoir(GameState s, string category, string title, string detail, int weight = 2)
+        {
+            if (s == null || string.IsNullOrWhiteSpace(title)) return;
+            s.Memoir ??= new();
+            s.Memoir.Add(new MemoirEntry
+            {
+                Date = DateStr(s),
+                Category = category,
+                Title = title,
+                Detail = detail,
+                Weight = weight
+            });
+            if (s.Memoir.Count > 64) s.Memoir.RemoveAt(0);
+        }
+
+        public static void EvaluateDirectivePromise(GameState s)
+        {
+            if (s == null || string.IsNullOrEmpty(s.ActiveDirectiveId) || s.Year < s.DirectiveEndYear) return;
+            int held = HeldMainland(s).Count;
+            int islandsHeld = new[] { "TW", "PH", "KM", "MZ", "DC", "ZS", "HI" }.Count(id => s.Control.GetValueOrDefault(id) == Faction.ROC);
+            bool met = s.ActiveDirectiveId switch
+            {
+                "dir_build_taiwan" => s.Gdp >= s.DirectiveBaselineGdp * 1.30,
+                "dir_fort_islands" => islandsHeld >= 4,
+                "dir_prep_counter" => held >= Math.Max(1, s.DirectiveBaselineHeld + 1),
+                "dir_north_expedition" => held >= s.DirectiveBaselineHeld + 3 || s.Control.GetValueOrDefault("HE") == Faction.ROC,
+                "dir_pacify_rear" => s.Morale >= 60 && s.GetFlag("warlordRisk") == 0,
+                "dir_port_corridor" => HeldMainland(s).Count(id => GameData.Nodes[id].Port) >= 2 && s.SupplyRatio >= 0.85,
+                "dir_silicon_shield" => s.Gdp >= s.DirectiveBaselineGdp * 1.35,
+                "dir_asymmetric" => s.Control.GetValueOrDefault("TW") == Faction.ROC && s.Gdp >= s.DirectiveBaselineGdp * 1.15,
+                "dir_cultural_wave" => s.Intl >= 55 || s.PrcStab < 55,
+                "dir_drive_ussr" => UssrNodes(s).Count < Math.Max(1, s.GetFlag("dirUssrBase")),
+                "dir_allied_ring" => s.UsRel >= 65 && s.Intl >= 60,
+                "dir_border_guerrilla" => UssrNodes(s).Count <= 1 || held >= 24,
+                _ => true
+            };
+
+            string name = string.IsNullOrEmpty(s.ActiveDirectiveName) ? s.ActiveDirectiveId : s.ActiveDirectiveName;
+            if (met)
+            {
+                s.Morale += 6;
+                s.Intl += 5;
+                Log(s, $"★ 時代國策【{name}】五年期滿承諾達成！民心 +6、國際地位 +5。", "big");
+                AddMemoir(s, "時代國策", $"國策達標：{name}", $"於 {s.DirectiveStartYear}–{s.DirectiveEndYear} 年完成既定戰略承諾，提振朝野士氣與國際聲望。", 4);
+            }
+            else
+            {
+                s.Morale -= 6;
+                s.Intl -= 4;
+                Log(s, $"✖ 時代國策【{name}】五年期滿未能兌現承諾，民心 -6、國際地位 -4。", "bad");
+                AddMemoir(s, "時代國策", $"國策受挫：{name}", $"五年期滿未能達成【{name}】核心承諾，統帥威信與外交籌碼受損。", 3);
+            }
+            s.ActiveDirectiveId = "";
+            s.ActiveDirectiveName = "";
+        }
+
+        public static readonly (string Key, string Name, string Chief, string BonusDesc)[] StaffFactions =
+        {
+            ("army",   "陸軍派", "參謀次長 雷振山 上將", "地面部隊攻防 +6%"),
+            ("navair", "海空派", "聯合作戰處長 沈海平 中將", "海空維持費 -12%、海空戰力 +6%"),
+            ("intel",  "情報派", "特勤主任 顧青雲 中將", "敵後網路成長 +25%、迷霧誤差 -3%"),
+            ("econ",   "經建派", "經建會主委 林仲衡", "GDP 成長 +8%、科研產出 +8%")
+        };
+
+        public static string DominantStaffFaction(GameState s)
+        {
+            if (s?.FactionInfluence == null || s.FactionInfluence.Count == 0) return "";
+            string best = "";
+            double bestVal = 54.99;
+            foreach (var spec in StaffFactions)
+            {
+                double val = s.FactionInfluence.TryGetValue(spec.Key, out double v) ? v : 50.0;
+                if (val > bestVal)
+                {
+                    bestVal = val;
+                    best = spec.Key;
+                }
+            }
+            return best;
+        }
+
+        public static string InferChoiceFaction(EventChoice c)
+        {
+            if (c == null) return "army";
+            if (!string.IsNullOrEmpty(c.FactionTag)) return c.FactionTag;
+            string txt = $"{c.Label} {c.Hint}";
+            if (txt.Contains("艦") || txt.Contains("航空") || txt.Contains("戰機") || txt.Contains("飛彈") || txt.Contains("登陸") || txt.Contains("海域"))
+                return "navair";
+            if (txt.Contains("情報") || txt.Contains("策反") || txt.Contains("特戰") || txt.Contains("起義") || txt.Contains("敵後") || txt.Contains("心戰") || txt.Contains("民兵"))
+                return "intel";
+            if (txt.Contains("GDP") || txt.Contains("經濟") || txt.Contains("工業") || txt.Contains("科研") || txt.Contains("研發") || txt.Contains("外交") || txt.Contains("美援") || txt.Contains("國際"))
+                return "econ";
+            return "army";
+        }
+
+        public static void ApplyChoiceFactionShift(GameState s, EventChoice c)
+        {
+            if (s == null || c == null) return;
+            s.FactionInfluence ??= new() { ["army"] = 50, ["navair"] = 50, ["intel"] = 50, ["econ"] = 50 };
+            string target = InferChoiceFaction(c);
+            foreach (var spec in StaffFactions)
+            {
+                double cur = s.FactionInfluence.TryGetValue(spec.Key, out double v) ? v : 50.0;
+                double next = spec.Key == target ? cur + 6.0 : cur - 2.0;
+                s.FactionInfluence[spec.Key] = Clamp(next, 0.0, 100.0);
+            }
+        }
+
         // ---------- 移動與調度 ----------
         public static double LiftCapacity(GameState s)
         {
-            double c = s.LiftBonus;
+            double c = s.LiftBonus + (HasDirective(s, "dir_port_corridor") ? 2.0 : 0.0);
             foreach (var u in UnitsAt(s, "TW", UnitDomain.Amph))
                 c += GameData.UnitTypes["amph"].LiftCap * (u.Str / 100.0);
             foreach (var u in s.Units.Where(x => x.Type == "fleet"))
@@ -775,12 +957,13 @@ namespace RocGame
             return za.FirstOrDefault(z => zb.Contains(z));
         }
 
-        public static int PrepRequiredDays(GameState s)
+        public static int PrepRequiredDays(GameState s, string zone = null)
         {
             int req = 8;
             if (s.Techs.Contains("landing_craft")) req -= 2;
             if (s.Techs.Contains("beach_ops")) req -= 2;
-            return Math.Max(4, req);
+            req += GetSeasonPrepDelta(s?.Month ?? 1, zone);
+            return Math.Max(3, req);
         }
 
         public static List<string> FindFriendlyLandPath(GameState s, string from, string dest, bool allowHostileDest)
@@ -913,7 +1096,7 @@ namespace RocGame
                 return (false, "", 0, "", why, null, 0, false, 0);
             }
             var seaPath = new List<string> { u.Loc, dest };
-            return (true, "sea", need, z, "", seaPath, ComputeTravelDays(s, u, seaPath, "sea"), true, PrepRequiredDays(s));
+            return (true, "sea", need, z, "", seaPath, ComputeTravelDays(s, u, seaPath, "sea"), true, PrepRequiredDays(s, z));
         }
 
         public static (bool ok, string kind, double lift, string zone, string reason) CheckMove(GameState s, Unit u, string dest)
@@ -1453,6 +1636,8 @@ namespace RocGame
         public static double RpPerTurnFor(GameState s, string targetId)
         {
             double baseRp = s.ResLevel * (96.0 + s.Gdp / 30.0) + s.RpBonus * 6.0;
+            if (DominantStaffFaction(s) == "econ") baseRp *= 1.08;
+            if (HasDirective(s, "dir_silicon_shield")) baseRp *= 1.15;
             return baseRp * (s.ResearchRush && !string.IsNullOrEmpty(targetId) ? 1.50 : 1.0);
         }
 
@@ -1534,14 +1719,29 @@ namespace RocGame
 
         // ---------- 財政 ----------
         public static double Upkeep(GameState s)
-            => s.Units.Sum(u => GameData.UnitTypes[u.Type].Upkeep * (0.4 + 0.6 * (u.Str / 100.0)))
-               * PriceIndex(s) * (s.Techs.Contains("auto_logi") ? 0.88 : 1.0) * (s.Techs.Contains("high_speed_logi") ? 0.92 : 1.0);
+        {
+            bool navDom = DominantStaffFaction(s) == "navair";
+            double raw = s.Units.Sum(u =>
+            {
+                var ut = GameData.UnitTypes[u.Type];
+                double k = (navDom && (ut.Domain == UnitDomain.Sea || ut.Domain == UnitDomain.Air)) ? 0.88 : 1.0;
+                return ut.Upkeep * (0.4 + 0.6 * (u.Str / 100.0)) * k;
+            });
+            double dirMult = (HasDirective(s, "dir_build_taiwan") ? 1.06 : 1.0)
+                           * (HasDirective(s, "dir_north_expedition") ? 1.08 : 1.0)
+                           * (HasDirective(s, "dir_silicon_shield") ? 1.05 : 1.0);
+            double autoSave = (s.ProvincePolicy?.Count(kv => kv.Value == "autonomy" && s.Control.GetValueOrDefault(kv.Key) == Faction.ROC) ?? 0) * 0.02 * PriceIndex(s);
+            double total = raw * PriceIndex(s) * (s.Techs.Contains("auto_logi") ? 0.88 : 1.0) * (s.Techs.Contains("high_speed_logi") ? 0.92 : 1.0) * dirMult;
+            return Math.Max(0.0, total - autoSave);
+        }
 
         public static double Income(GameState s)
         {
             double rate = s.Tax == "low" ? 0.12 : (s.Tax == "high" ? 0.20 : 0.16);
             double tax = s.Gdp * rate * 0.65;
-            double occ = GameData.MainlandIds.Where(id => s.Control[id] == Faction.ROC).Sum(id => GameData.Nodes[id].Industry);
+            double occ = GameData.MainlandIds
+                .Where(id => s.Control[id] == Faction.ROC)
+                .Sum(id => GameData.Nodes[id].Industry * (s.ProvincePolicy?.GetValueOrDefault(id) == "civil" ? 1.25 : 1.0));
             return tax + s.UsAid * PriceIndex(s) + occ * PriceIndex(s) * 0.18;
         }
 
@@ -1868,6 +2068,19 @@ namespace RocGame
             s.ExposedNodeId ??= "";
             s.WindowZoneId ??= "";
             s.WindowTargetId ??= "";
+            s.ActiveDirectiveId ??= "";
+            s.ActiveDirectiveName ??= "";
+            if (string.IsNullOrEmpty(s.LastLiberationPolicy)) s.LastLiberationPolicy = "civil";
+            s.ProvincePolicy ??= new();
+            s.FactionInfluence ??= new();
+            s.FactionLowMonths ??= new();
+            foreach (var spec in StaffFactions)
+            {
+                if (!s.FactionInfluence.ContainsKey(spec.Key)) s.FactionInfluence[spec.Key] = 50.0;
+                else s.FactionInfluence[spec.Key] = Clamp(s.FactionInfluence[spec.Key], 0.0, 100.0);
+                if (!s.FactionLowMonths.ContainsKey(spec.Key)) s.FactionLowMonths[spec.Key] = 0;
+            }
+            s.Memoir ??= new();
             s.ResearchProgMap ??= new();
             s.ActiveTechs ??= new();
             s.ResearchQueue ??= new();
@@ -2067,14 +2280,18 @@ namespace RocGame
                 if (landedIds.Contains(u.Id))
                 {
                     double winBon = n.Zones.Any(z => s.GetFlag("winBonus_" + z) >= s.TotalMonths) ? 0.08 : 0.0;
-                    v *= (0.68 + s.LandingBonus + winBon + (T.Marine ? 0.22 : 0.0));
+                    double dirLand = HasDirective(s, "dir_prep_counter") ? 0.08 : 0.0;
+                    v *= (0.68 + s.LandingBonus + winBon + dirLand + (T.Marine ? 0.22 : 0.0));
                 }
                 p += v;
             }
             double fort = !attacking ? 1.0 + 0.3 * FortificationLevel(s, nid) : 1.0;
             // 海南粵桂殘部指揮失調與瓊崖縱隊裡應外合拖累戰力（需掃蕩或收復華南）
             double localDrag = (nid == "HI" && s.HasFlag("hiQiongya")) ? 0.80 : 1.0;
-            return p * moraleF * (1.0 + s.BattleBonus) * fort * localDrag;
+            double armyFacMult = DominantStaffFaction(s) == "army" ? 1.06 : 1.0;
+            double dirCombat = (HasDirective(s, "dir_north_expedition") ? 1.08 : 1.0)
+                             * (HasDirective(s, "dir_drive_ussr") && s.Control.GetValueOrDefault(nid) == Faction.USSR ? 1.10 : 1.0);
+            return p * moraleF * (1.0 + s.BattleBonus) * fort * localDrag * armyFacMult * dirCombat;
         }
 
         public static void Battle(GameState s, string nid, bool rocAttacking, HashSet<int> landedIds)
@@ -2270,6 +2487,11 @@ namespace RocGame
                             double loss = baseLoss * (1.0 - 0.55 * sea) * (1.0 - 0.45 * air);
                             unit.Str -= loss * (0.7 + 0.6 * Rng(s));
                         }
+                        if ((s.Month is 7 or 8 or 9) && (order.Zone is "Z2" or "Z3" or "Z4"))
+                        {
+                            double storm = 2.5 * (1.0 - 0.4 * sea) * (0.6 + 0.8 * Rng(s));
+                            unit.Str -= storm;
+                        }
                         if (hostile || reverseBeachhead) { activeZones.Add(order.Zone); landedIds.Add(unit.Id); }
                     }
                     else if (order.Kind == "air")
@@ -2413,6 +2635,9 @@ namespace RocGame
             s.ActionsUsed.Clear();
             StepAutoActions(s);
             if (s.UsConsent > 0) s.UsConsent--;
+            if (HasDirective(s, "dir_allied_ring")) { s.Intl += 1.0; s.UsRel += 1.0; }
+            if (HasDirective(s, "dir_cultural_wave")) s.Intl += 0.5;
+            EvaluateDirectivePromise(s);
             s.History.Add(Snapshot(s));
         }
 
@@ -2529,6 +2754,72 @@ namespace RocGame
             StepAutoActions(s);
             EconomyStep(s, dt, stepResearch);
             PrcUpdate(s, dt);
+
+            // 季節 B：12–2 月北疆嚴冬雙方耗損
+            if (s.Month is 12 or 1 or 2)
+            {
+                foreach (var bid in GameData.BorderUssrIds)
+                {
+                    if (s.Control.GetValueOrDefault(bid) == Faction.ROC || UnitsAt(s, bid, UnitDomain.Land).Count > 0)
+                    {
+                        foreach (var u in UnitsAt(s, bid, UnitDomain.Land))
+                            u.Str = Math.Max(15.0, u.Str - 1.2);
+                    }
+                    if (s.Control.GetValueOrDefault(bid) != Faction.ROC)
+                    {
+                        double wFloor = NominalGarrison(s, bid) * 0.50;
+                        if (s.Garrison[bid] > wFloor)
+                            s.Garrison[bid] = Math.Max(wFloor, s.Garrison[bid] * 0.97);
+                    }
+                }
+                if (s.Month == 12)
+                    Log(s, "❄ 塞外嚴冬降臨，黑龍江、吉林、遼寧、內蒙古、新疆雙方駐軍承受嚴寒損耗。", "");
+            }
+
+            // 國策 A 月度細項效果
+            if (HasDirective(s, "dir_prep_counter") && HeldMainland(s).Count == 0)
+                s.Morale -= 0.15;
+            else if (HasDirective(s, "dir_pacify_rear"))
+            {
+                s.Morale += 0.1;
+                s.PrcStab -= 0.04;
+                foreach (var hid in HeldMainland(s)) s.Unrest[hid] = Math.Max(0.0, s.Unrest[hid] - 1.0);
+            }
+            else if (HasDirective(s, "dir_port_corridor"))
+                s.Supply += 0.5;
+            else if (HasDirective(s, "dir_cultural_wave"))
+            {
+                s.PrcStab -= 0.05;
+                foreach (var mid in GameData.MainlandIds)
+                    if (s.Control.GetValueOrDefault(mid) == Faction.PRC) s.Unrest[mid] += 0.1;
+            }
+            else if (HasDirective(s, "dir_border_guerrilla"))
+            {
+                foreach (var bid in GameData.BorderUssrIds)
+                {
+                    if (s.Control.GetValueOrDefault(bid) != Faction.ROC)
+                    {
+                        double gFloor = NominalGarrison(s, bid) * 0.50;
+                        s.Garrison[bid] = Math.Max(gFloor, s.Garrison[bid] * 0.99);
+                        s.Unrest[bid] += 1.5;
+                    }
+                }
+            }
+
+            // 參謀四派 C 月度衰減與冷落統計
+            s.FactionInfluence ??= new() { ["army"] = 50, ["navair"] = 50, ["intel"] = 50, ["econ"] = 50 };
+            s.FactionLowMonths ??= new() { ["army"] = 0, ["navair"] = 0, ["intel"] = 0, ["econ"] = 0 };
+            string over80 = StaffFactions.FirstOrDefault(sp => s.FactionInfluence.GetValueOrDefault(sp.Key, 50.0) >= 80.0).Key;
+            foreach (var spec in StaffFactions)
+            {
+                double val = s.FactionInfluence.GetValueOrDefault(spec.Key, 50.0);
+                if (!string.IsNullOrEmpty(over80) && spec.Key != over80)
+                    val = Math.Max(0.0, val - 0.5);
+                s.FactionInfluence[spec.Key] = val;
+                if (val < 15.0) s.FactionLowMonths[spec.Key] = s.FactionLowMonths.GetValueOrDefault(spec.Key, 0) + 1;
+                else s.FactionLowMonths[spec.Key] = 0;
+            }
+
             RollFog(s);
             Normalize(s);
             TouchFrontClock(s);
@@ -2561,7 +2852,8 @@ namespace RocGame
             if (need <= 0) { s.SupplyRatio = 1.0; return; }
             double sup = zonesUsed.Count > 0 ? zonesUsed.Average(z => SeaSup(s, z)) : 1.0;
             int ports = GameData.MainlandIds.Count(id => s.Control[id] == Faction.ROC && GameData.Nodes[id].Port);
-            double cap = (s.SupplyCap + ports * 1.8) * (0.4 + 0.6 * sup) * (LiftCapacity(s) > 0 ? 1.0 : 0.5) * dt;
+            double dirSupplyCap = HasDirective(s, "dir_port_corridor") ? 3.0 : 0.0;
+            double cap = (s.SupplyCap + dirSupplyCap + ports * 1.8) * (0.4 + 0.6 * sup) * (LiftCapacity(s) > 0 ? 1.0 : 0.5) * dt;
             double delivered = Math.Min(need, Math.Min(cap, s.Supply));
             s.Supply -= delivered;
             double ratio = delivered / need;
@@ -2866,9 +3158,15 @@ namespace RocGame
             double burden = Clamp(1.0 - Math.Max(0.0, mil - 0.55) * 0.5, 0.55, 1.0);
             double moraleF = 0.8 + 0.4 * (s.Morale / 100.0);
             double war = GameData.MainlandIds.Any(id => UnitsAt(s, id, UnitDomain.Land).Count > 0) ? 0.12 : 0.0;
-            double annualG = Math.Max(-0.5, gh * s.EconMult * burden * moraleF * (1.0 - war));
+            double dirEcon = HasDirective(s, "dir_build_taiwan") ? 1.15
+                           : HasDirective(s, "dir_fort_islands") ? 0.95
+                           : HasDirective(s, "dir_silicon_shield") ? 1.10
+                           : HasDirective(s, "dir_asymmetric") ? 0.96 : 1.0;
+            double facEcon = DominantStaffFaction(s) == "econ" ? 1.08 : 1.0;
+            double annualG = Math.Max(-0.5, gh * s.EconMult * burden * moraleF * (1.0 - war) * dirEcon * facEcon);
             s.Gdp *= Math.Pow(1.0 + annualG, dt);
-            s.Manpower += (1.4 + (s.Year - 1950) / 35.0 + HeldMainland(s).Count * 0.45) * dt;
+            double dirMan = HasDirective(s, "dir_prep_counter") ? 1.30 : 1.0;
+            s.Manpower += (1.4 + (s.Year - 1950) / 35.0 + HeldMainland(s).Count * 0.45) * dirMan * dt;
             s.Morale += (56.0 - s.Morale) * 0.008 + (s.Debt > s.Gdp * 0.5 ? -0.20 : 0.0);
             if (s.UsAid > 0 && s.Year >= 1965) s.UsAid = Math.Max(0, s.UsAid - 0.05 * dt);
         }

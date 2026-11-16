@@ -117,9 +117,10 @@ namespace RocGame
                 }
             }
 
-            // 1) 🐻 俄國/蘇聯趁機侵占北疆事件
+            // 1) 🐻 俄國/蘇聯趁機侵占北疆事件（嚴冬機率減半）
             var availBorder = GameData.BorderUssrIds.Where(id => s.Control[id] == Faction.PRC).ToList();
-            if (availBorder.Count > 0 && (s.PrcStab < 46 || held.Count >= 2 || s.SovRel >= 24) && SimEngine.Chance(s, 0.14) && CooldownOk(s, "russian_inv", 18))
+            double rusInvChance = (s.Month is 12 or 1 or 2) ? 0.07 : 0.14;
+            if (availBorder.Count > 0 && (s.PrcStab < 46 || held.Count >= 2 || s.SovRel >= 24) && SimEngine.Chance(s, rusInvChance) && CooldownOk(s, "russian_inv", 18))
             {
                 string targetId = availBorder[(int)(SimEngine.Rng(s) * availBorder.Count)];
                 string tName = GameData.Nodes[targetId].Name;
@@ -449,6 +450,19 @@ namespace RocGame
             }
 
             if (s.TotalMonths < 2) return;
+
+            // 系統 C：參謀本部派系長期遭冷落（< 15 持續 24 個月）觸發派系反彈
+            if (s.FactionLowMonths != null)
+            {
+                foreach (var spec in SimEngine.StaffFactions)
+                {
+                    if (s.FactionLowMonths.GetValueOrDefault(spec.Key, 0) >= 24 && CooldownOk(s, $"faction_backlash_{spec.Key}", 24))
+                    {
+                        s.PendingEvents.Add(BuildFactionBacklashEvent(s, spec));
+                        return;
+                    }
+                }
+            }
 
             // 9) 多元主題加權輪抽池：破除固定順序重複，依當下戰局與冷卻輪替呈現外交、內政、諜報、財經、海空與前線事件
             if (!SimEngine.Chance(s, 0.72)) return;
@@ -1891,6 +1905,48 @@ namespace RocGame
                             st.FrontHeadlineKind = "quiet";
                             st.FrontHeadline = $"態勢轉變：我方按兵未動，共軍正增補【{tgtName}】防務填補窗口。";
                             SimEngine.Log(st, $"我軍暫緩對【{tgtName}】出擊，海空編隊完成整補。", "");
+                        }
+                    }
+                }
+            };
+        }
+
+        private static GameEvent BuildFactionBacklashEvent(GameState s, (string Key, string Name, string Chief, string BonusDesc) spec)
+        {
+            double px = SimEngine.PriceIndex(s);
+            return new GameEvent
+            {
+                Id = $"dyn_faction_backlash_{spec.Key}_{s.Year}_{s.Month}",
+                Year = s.Year, Month = s.Month, Day = s.Day, Tag = "中樞政情",
+                Title = $"【{spec.Name}反彈】{spec.Chief}抗議長期邊緣化",
+                Desc = $"由於統帥部連續兩年冷落【{spec.Name}】意見，{spec.Chief}聯合幕僚團提交辭呈並質疑中樞資源分配失衡，引起軍政界震動。",
+                Choices = new List<EventChoice>
+                {
+                    new() {
+                        Label = $"撥發專案經費並重申重視{spec.Name}建言，挽留核心幕僚",
+                        Hint = $"國庫 -${(0.35 * px):F1} 億；{spec.Name}影響力回升至 35、民心 +2",
+                        FactionTag = spec.Key,
+                        Effect = st => {
+                            SpendTreasury(st, 0.35);
+                            st.FactionInfluence ??= new();
+                            st.FactionInfluence[spec.Key] = Math.Max(st.FactionInfluence.GetValueOrDefault(spec.Key, 0), 35.0);
+                            if (st.FactionLowMonths != null) st.FactionLowMonths[spec.Key] = 0;
+                            st.Morale += 2;
+                            SimEngine.Log(st, $"統帥部出面安撫【{spec.Name}】，{spec.Chief}留任並恢復中樞協作。", "good");
+                        }
+                    },
+                    new() {
+                        Label = $"強勢整肅異議並下令服從中樞調度",
+                        Hint = $"不耗國庫，{spec.Name}影響力調回 22；但民心 -4 且軍政割據風險 +1 級",
+                        FactionTag = "army",
+                        Effect = st => {
+                            st.FactionInfluence ??= new();
+                            st.FactionInfluence[spec.Key] = Math.Max(st.FactionInfluence.GetValueOrDefault(spec.Key, 0), 22.0);
+                            if (st.FactionLowMonths != null) st.FactionLowMonths[spec.Key] = 0;
+                            st.Morale -= 4;
+                            st.Flags["warlordRisk"] = st.GetFlag("warlordRisk") + 1;
+                            SimEngine.AddMemoir(st, "中樞政情", $"壓制{spec.Name}反彈", $"{spec.Chief}遭撤換整肅，派系積怨轉為潛在割據風險。", 2);
+                            SimEngine.Log(st, $"中樞強硬壓制【{spec.Name}】抗議，前線與部會裂痕加深。", "bad");
                         }
                     }
                 }
