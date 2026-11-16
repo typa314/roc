@@ -36,6 +36,7 @@ namespace RocGame
             foreach (var id in ids)
             {
                 if (!s.Garrison.ContainsKey(id) || GameData.Zones.ContainsKey(id)) continue;
+                if (s.Control.TryGetValue(id, out var f) && f == Faction.ROC) continue;
                 double g = s.Garrison[id];
                 double floor = Math.Max(0.8, SimEngine.NominalGarrison(s, id) * 0.45);
                 double next = Math.Max(floor, g * (1.0 - frac));

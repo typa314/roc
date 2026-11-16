@@ -101,6 +101,22 @@ namespace RocGame
                 return;
             }
 
+            if (s.TotalMonths >= 2)
+            {
+                SimEngine.AssessPosture(s);
+                if (!string.IsNullOrEmpty(s.ExposedNodeId) && CooldownOk(s, $"posture_exp_{ctx.Theater}", 6))
+                {
+                    s.PendingEvents.Add(BuildExposurePostureEvent(s, ctx));
+                    return;
+                }
+                if (string.IsNullOrEmpty(s.ExposedNodeId) && !string.IsNullOrEmpty(s.WindowTargetId)
+                    && !ctx.OnlyUssrRemains && CooldownOk(s, $"posture_win_{ctx.Theater}", 6))
+                {
+                    s.PendingEvents.Add(BuildWindowPostureEvent(s, ctx));
+                    return;
+                }
+            }
+
             // 1) 🐻 俄國/蘇聯趁機侵占北疆事件
             var availBorder = GameData.BorderUssrIds.Where(id => s.Control[id] == Faction.PRC).ToList();
             if (availBorder.Count > 0 && (s.PrcStab < 46 || held.Count >= 2 || s.SovRel >= 24) && SimEngine.Chance(s, 0.14) && CooldownOk(s, "russian_inv", 18))
@@ -228,19 +244,19 @@ namespace RocGame
                     {
                         new() {
                             Label = $"空投武器彈藥，正式收編為「{milCause}民兵」支隊",
-                            Hint = $"消耗補給 3；在{GameData.Nodes[spawnLoc].Name}獲得 1 支「民兵/游擊」部隊（戰力 85%），並削弱{pName}{milEnemy} 1.0 師",
+                            Hint = $"消耗補給 3；在{GameData.Nodes[spawnLoc].Name}獲得 1 支「民兵/游擊」部隊（戰力 85%），並削弱{pName}{milEnemy}約 8% 守軍",
                             Effect = st => {
                                 st.Supply = Math.Max(0, st.Supply - 3);
                                 SimEngine.AddUnit(st, "mil", spawnLoc, 85);
-                                if (st.Control[pid] != Faction.ROC) st.Garrison[pid] = Math.Max(0.5, st.Garrison[pid] - 1.0);
+                                ChipHeld(st, new[] { pid }, 0.08);
                                 SimEngine.Log(st, $"★ {pName}{milCause}民兵獲我方空投支援，於【{GameData.Nodes[spawnLoc].Name}】正式加入戰鬥序列！", "good");
                             }
                         },
                         new() {
                             Label = $"指示民兵就地潛伏，襲擊{milEnemy}糧倉與鐵路補給線",
-                            Hint = $"{pName}{milEnemy}守軍 -1.6 師、民心浮動 +12，我方獲得情報與兵源 +1.5",
+                            Hint = $"{pName}{milEnemy}守軍約 -12%、民心浮動 +12，我方獲得情報與兵源 +1.5",
                             Effect = st => {
-                                if (st.Control[pid] != Faction.ROC) st.Garrison[pid] = Math.Max(0.5, st.Garrison[pid] - 1.6);
+                                ChipHeld(st, new[] { pid }, 0.12);
                                 st.Unrest[pid] = SimEngine.Clamp(st.Unrest[pid] + 12, 0, 100);
                                 st.Manpower += 1.5;
                                 SimEngine.Log(st, $"{pName}義勇民兵襲擊{milEnemy}後勤車隊，重創當地守軍！", "good");
@@ -268,11 +284,10 @@ namespace RocGame
                     {
                         new() {
                             Label = "派遣空地兵力掩護接應，整編為國軍「起義投誠部隊」",
-                            Hint = $"在{GameData.Nodes[destNode].Name}獲得 1 支「投誠部隊」（戰力 85%），{defSrcName}共軍 -1 師，民心 +4",
+                            Hint = $"在{GameData.Nodes[destNode].Name}獲得 1 支「投誠部隊」（戰力 85%），{defSrcName}共軍約 -9%，民心 +4",
                             Effect = st => {
                                 SimEngine.AddUnit(st, "dfc", destNode, 85);
-                                if (st.Control[defSrcId] == Faction.PRC)
-                                    st.Garrison[defSrcId] = Math.Max(0.8, st.Garrison[defSrcId] - 1.0);
+                                ChipHeld(st, new[] { defSrcId }, 0.09);
                                 st.Morale += 4;
                                 SimEngine.Log(st, $"★ {defSrcName}共軍部隊陣前起義來歸，已於{GameData.Nodes[destNode].Name}整編入列！", "good");
                             }
@@ -522,12 +537,11 @@ namespace RocGame
                             {
                                 new() {
                                     Label = $"下令艦隊與戰機強勢攔截接戰，爭奪{zName}制海制空權",
-                                    Hint = $"補給 -4；空軍與海軍科技各 +0.25、{ztNames}敵軍各 -0.6 師、美國關係 -2",
+                                    Hint = $"補給 -4；空軍與海軍科技各 +0.25、{ztNames}敵軍約 -9%、美國關係 -2",
                                     Effect = st => {
                                         st.Supply = Math.Max(0, st.Supply - 4);
                                         st.AirTech += 0.25; st.NavyTech += 0.25;
-                                        foreach (var tid in zoneTargets)
-                                            if (st.Control[tid] != Faction.ROC) st.Garrison[tid] = Math.Max(0.5, st.Garrison[tid] - 0.6);
+                                        ChipHeld(st, zoneTargets, 0.09);
                                         st.UsRel -= 2;
                                         SimEngine.Log(st, $"我軍{zName}海空編隊果斷迎擊敵軍挑釁，迫退敵機艦並削弱【{ztNames}】防務！", "good");
                                     }
@@ -568,12 +582,11 @@ namespace RocGame
                         {
                             new() {
                                 Label = $"全力出動戰鬥轟炸機壓制{atNames}之{enemyTerm}機群與裝甲縱隊",
-                                Hint = $"補給 -4；空軍與陸軍科技各 +0.25、{atNames}{enemyTerm}守軍各 -0.7 師",
+                                Hint = $"補給 -4；空軍與陸軍科技各 +0.25、{atNames}{enemyTerm}守軍約 -9%",
                                 Effect = st => {
                                     st.Supply = Math.Max(0, st.Supply - 4);
                                     st.AirTech += 0.25; st.ArmyTech += 0.25;
-                                    foreach (var tid in airTargets)
-                                        if (st.Control[tid] != Faction.ROC) st.Garrison[tid] = Math.Max(0.5, st.Garrison[tid] - 0.7);
+                                    ChipHeld(st, airTargets, 0.09);
                                     SimEngine.Log(st, $"我方空地編隊重創【{atNames}】{enemyTerm}先遣縱隊，奪得前線制空優勢！", "good");
                                 }
                             },
@@ -612,11 +625,10 @@ namespace RocGame
                         {
                             new() {
                                 Label = "依戰時封鎖令強制押回高雄港沒收戰略物資",
-                                Hint = $"國庫 +$0.5 億、補給 +10、{tgtNames}敵軍略減，但國際地位 -4",
+                                Hint = $"國庫 +$0.5 億、補給 +10、{tgtNames}敵軍約 -8%，但國際地位 -4",
                                 Effect = st => {
                                     st.Treasury += 0.5; st.Supply += 10; st.Intl -= 4;
-                                    foreach (var id in ctx.HostileFrontNodes.Take(2))
-                                        if (st.Control[id] != Faction.ROC) st.Garrison[id] = Math.Max(0.5, st.Garrison[id] - 0.5);
+                                    ChipHeld(st, ctx.HostileFrontNodes.Take(2), 0.08);
                                     SimEngine.Log(st, $"海軍依關閉政策扣押資匪貨輪，充實軍需但也招致外國領事抗議。", "");
                                 }
                             },
@@ -879,13 +891,11 @@ namespace RocGame
                             Hint = $"科研進度 +1.6、{ftNames}敵後動盪 +10、前線敵軍防務受誤導削弱",
                             Effect = st => {
                                 st.ResearchProg += 1.6;
+                                ChipHeld(st, frontTargets, 0.08);
                                 foreach (var id in frontTargets)
                                 {
                                     if (st.Control[id] != Faction.ROC)
-                                    {
                                         st.Unrest[id] = SimEngine.Clamp(st.Unrest[id] + 10, 0, 100);
-                                        st.Garrison[id] = Math.Max(0.5, st.Garrison[id] - 0.5);
-                                    }
                                 }
                                 SimEngine.Log(st, "我方成功策反雙面電台誤導敵情研判，使敵軍調防陷入混亂！", "big");
                             }
@@ -996,17 +1006,15 @@ namespace RocGame
                     {
                         new() {
                             Label = "密令地下人員串聯抗暴群眾並收買邊區治安幹部",
-                            Hint = $"國庫 -${(0.30 * SimEngine.PriceIndex(s)):F1} 億；{tNames}動盪 +16、敵守軍 -0.8 師、中共穩定度 -5",
+                            Hint = $"國庫 -${(0.30 * SimEngine.PriceIndex(s)):F1} 億；{tNames}動盪 +16、敵守軍約 -9%、中共穩定度 -5",
                             Effect = st => {
                                 SpendTreasury(st, 0.30);
                                 st.PrcStab -= 5;
+                                ChipHeld(st, targets, 0.09);
                                 foreach (var id in targets)
                                 {
                                     if (st.Control[id] == Faction.PRC)
-                                    {
                                         st.Unrest[id] = SimEngine.Clamp(st.Unrest[id] + 16, 0, 100);
-                                        st.Garrison[id] = Math.Max(0.5, st.Garrison[id] - 0.8);
-                                    }
                                 }
                                 SimEngine.Log(st, $"【{tNames}】抗徵糧浪潮愈演愈烈，共軍被迫抽兵維持後方秩序。", "good");
                             }
@@ -1042,11 +1050,10 @@ namespace RocGame
                         },
                         new() {
                             Label = "令其就地潛伏充當長期內線，專供我軍前線調動情資",
-                            Hint = $"{tNames}共軍佈防暴露削弱（-0.9 師）、中共穩定度 -4",
+                            Hint = $"{tNames}共軍佈防暴露削弱（約 -10%）、中共穩定度 -4",
                             Effect = st => {
                                 st.PrcStab -= 4;
-                                foreach (var id in targets)
-                                    if (st.Control[id] == Faction.PRC) st.Garrison[id] = Math.Max(0.5, st.Garrison[id] - 0.9);
+                                ChipHeld(st, targets, 0.10);
                                 SimEngine.AddIntel(st, "密謀警示", "good", $"潛伏內線定期回報【{tNames}】兵力輪調明細，前線動向一目了然。");
                                 SimEngine.Log(st, $"我方高層內線持續回傳【{tNames}】部署情報，前線敵情完全透明。", "good");
                             }
@@ -1092,13 +1099,12 @@ namespace RocGame
                 {
                     new() {
                         Label = $"發動前線砲兵與裝甲重拳突穿，強壓【{ftNames}】{enemyTerm}防線",
-                        Hint = $"國庫 -${(0.45 * px):F1} 億、補給 -4；{ftNames}{enemyTerm}守軍各 -0.9 師、地面戰鬥 +3%",
+                        Hint = $"國庫 -${(0.45 * px):F1} 億、補給 -4；{ftNames}{enemyTerm}守軍約 -10%、地面戰鬥 +3%",
                         Effect = st => {
                             SpendTreasury(st, 0.45);
                             st.Supply = Math.Max(0, st.Supply - 4);
                             st.BattleBonus += 0.03;
-                            foreach (var tid in frontTargets)
-                                if (st.Control[tid] != Faction.ROC) st.Garrison[tid] = Math.Max(0.5, st.Garrison[tid] - 0.9);
+                            ChipHeld(st, frontTargets, 0.10);
                             SimEngine.Log(st, $"★ 我軍重裝火力猛襲【{ftNames}】{enemyTerm}防線，前線將士乘勢擴大突破口！", "big");
                         }
                     },
@@ -1521,14 +1527,12 @@ namespace RocGame
                     {
                         new() {
                             Label = $"集中重砲與空中火力猛轟【{frontNames2}】之{enemyTerm}防線",
-                            Hint = $"國庫 -${(0.40 * px):F1} 億、補給 -4；{frontNames3}{enemyTerm}守軍各 -0.8 師、陸軍科技 +0.2",
+                            Hint = $"國庫 -${(0.40 * px):F1} 億、補給 -4；{frontNames3}{enemyTerm}守軍約 -10%、陸軍科技 +0.2",
                             Effect = st => {
                                 SpendTreasury(st, 0.40);
                                 st.Supply = Math.Max(0, st.Supply - 4);
                                 st.ArmyTech += 0.2;
-                                foreach (var id in frontTargets.Take(3))
-                                    if (st.Control[id] != Faction.ROC)
-                                        st.Garrison[id] = Math.Max(0.5, st.Garrison[id] - 0.8);
+                                ChipHeld(st, frontTargets.Take(3), 0.10);
                                 SimEngine.Log(st, $"我方重砲火力精準覆蓋【{frontNames3}】陣地，{enemyTerm}前線構築工事遭嚴重摧毀！", "good");
                             }
                         },
@@ -1559,12 +1563,11 @@ namespace RocGame
                         {
                             new() {
                                 Label = $"配發極寒冬防油料被服，集中裝甲師向【{uNames}】實施多路穿插",
-                                Hint = $"國庫 -${(0.45 * px):F1} 億、補給 -4；{uNames}{uEnemy}守軍各 -1.0 師、前線戰力 +6%",
+                                Hint = $"國庫 -${(0.45 * px):F1} 億、補給 -4；{uNames}{uEnemy}守軍約 -10%、前線戰力 +6%",
                                 Effect = st => {
                                     SpendTreasury(st, 0.45);
                                     st.Supply = Math.Max(0, st.Supply - 4);
-                                    foreach (var uid in uTargets)
-                                        if (st.Control[uid] == Faction.USSR) st.Garrison[uid] = Math.Max(0.5, st.Garrison[uid] - 1.0);
+                                    ChipHeld(st, uTargets, 0.10);
                                     foreach (var u in st.Units.Where(x => ctx.RocFrontNodes.Contains(x.Loc) || x.Loc == fwdRoc))
                                         u.Str = Math.Min(100, u.Str + 6);
                                     SimEngine.Log(st, $"國軍寒地裝甲部隊突破風雪壓迫【{uNames}】{uEnemy}防線！", "good");
@@ -1596,17 +1599,15 @@ namespace RocGame
                     {
                         new() {
                             Label = $"對【{frontNames2}】全面投送返鄉心戰傳單並開啟投誠接應窗口",
-                            Hint = $"補給 -2；{frontNames3}{enemyTerm}動盪 +12 並削弱守軍 -0.6 師、民心 +3",
+                            Hint = $"補給 -2；{frontNames3}{enemyTerm}動盪 +12 並削弱守軍約 8%、民心 +3",
                             Effect = st => {
                                 st.Supply = Math.Max(0, st.Supply - 2);
                                 st.Morale += 3;
+                                ChipHeld(st, frontTargets.Take(3), 0.08);
                                 foreach (var id in frontTargets.Take(3))
                                 {
                                     if (st.Control[id] != Faction.ROC)
-                                    {
                                         st.Unrest[id] = SimEngine.Clamp(st.Unrest[id] + 12, 0, 100);
-                                        st.Garrison[id] = Math.Max(0.5, st.Garrison[id] - 0.6);
-                                    }
                                 }
                                 SimEngine.Log(st, $"我軍心理攻勢直擊【{frontNames3}】{enemyTerm}官兵士氣，敵營逃亡與厭戰情事激增！", "good");
                             }
@@ -1624,6 +1625,276 @@ namespace RocGame
             };
 
             return PickRotatedTemplate(s, "mil_tpl_", pool, 36);
+        }
+
+        private static string FindRearSourceFor(GameState s, string targetId, FrontlineContext ctx)
+        {
+            if (ctx.HeldMainland.Count > 0)
+            {
+                var rearMainland = ctx.HeldMainland
+                    .Where(id => id != targetId && !ctx.RocFrontNodes.Contains(id)
+                                 && SimEngine.UnitsAt(s, id, UnitDomain.Land).Any(u => !u.Moved))
+                    .OrderByDescending(id => SimEngine.UnitsAt(s, id, UnitDomain.Land).Count(u => !u.Moved))
+                    .FirstOrDefault();
+                if (!string.IsNullOrEmpty(rearMainland)) return rearMainland;
+
+                var anyMainland = ctx.HeldMainland
+                    .Where(id => id != targetId && SimEngine.UnitsAt(s, id, UnitDomain.Land).Count(u => !u.Moved) >= 2)
+                    .OrderByDescending(id => SimEngine.UnitsAt(s, id, UnitDomain.Land).Count(u => !u.Moved))
+                    .FirstOrDefault();
+                if (!string.IsNullOrEmpty(anyMainland)) return anyMainland;
+            }
+            return targetId == "TW" ? ctx.PickForwardRocNode(s) : "TW";
+        }
+
+        private static Unit FindReinforceUnit(GameState s, string srcId, string destId, out string failReason)
+        {
+            failReason = "";
+            var idle = SimEngine.UnitsAt(s, srcId, UnitDomain.Land)
+                .Where(u => !u.Moved)
+                .OrderByDescending(u => u.Str)
+                .ToList();
+            if (idle.Count == 0)
+            {
+                failReason = $"{GameData.Nodes[srcId].Name}無待命地面部隊";
+                return null;
+            }
+            foreach (var u in idle)
+            {
+                var chk = SimEngine.CheckMove(s, u, destId);
+                if (chk.ok) return u;
+                failReason = chk.reason;
+            }
+            return null;
+        }
+
+        private static string FindRetreatDestFor(GameState s, string expId, FrontlineContext ctx)
+        {
+            var rearMainland = ctx.HeldMainland
+                .Where(id => id != expId && !ctx.RocFrontNodes.Contains(id))
+                .FirstOrDefault();
+            if (!string.IsNullOrEmpty(rearMainland) && GameData.Nodes[expId].Kind == NodeKind.Mainland)
+                return rearMainland;
+            return "TW";
+        }
+
+        private static GameEvent BuildExposurePostureEvent(GameState s, FrontlineContext ctx)
+        {
+            if (ctx.OnlyUssrRemains)
+            {
+                string expId = !string.IsNullOrEmpty(s.ExposedNodeId) ? s.ExposedNodeId : ctx.PickForwardRocNode(s);
+                string expName = GameData.Nodes[expId].Name;
+                string srcId = FindRearSourceFor(s, expId, ctx);
+                string srcName = GameData.Nodes[srcId].Name;
+                var cand = FindReinforceUnit(s, srcId, expId, out string failWhy);
+                string ussrTgt = ctx.UssrFrontNodes.FirstOrDefault() ?? ctx.UssrNodes.FirstOrDefault() ?? "";
+                string ussrName = !string.IsNullOrEmpty(ussrTgt) ? GameData.Nodes[ussrTgt].Name : "北疆俄占區";
+                string rName = s.Year >= 1992 ? "俄軍" : "蘇俄軍";
+
+                return new GameEvent
+                {
+                    Id = $"dyn_posture_exp_{s.Year}_{s.Month}",
+                    Year = s.Year, Month = s.Month, Day = s.Day, Tag = "態勢警訊",
+                    Title = $"北疆防線告急：【{expName}】對俄側翼兵力薄弱",
+                    Desc = $"前線急電：我軍駐防【{expName}】兵力不足以單獨抗衡【{ussrName}】方向的{rName}機械化兵團，統帥部須決定立即增兵、收縮加固防線，或藉外交輿論施壓牽制。",
+                    Choices = new List<EventChoice>
+                    {
+                        new() {
+                            Label = cand != null ? $"自【{srcName}】調派 1 師星夜馳援【{expName}】" : $"嘗試自【{srcName}】抽調增援【{expName}】（條件不足）",
+                            Hint = cand != null ? $"調派部隊自{srcName}增援{expName}，消耗補給 2" : $"無法執行調動：{failWhy}",
+                            FactionTag = "army",
+                            Effect = st => {
+                                var u = FindReinforceUnit(st, srcId, expId, out string why);
+                                if (u != null && SimEngine.CheckMove(st, u, expId).ok)
+                                {
+                                    SimEngine.MoveNow(st, new[] { u.Id }, expId, manual: true);
+                                    st.Supply = Math.Max(0, st.Supply - 2);
+                                }
+                                else SimEngine.Log(st, $"北疆增援【{expName}】未執行：{why}", "bad");
+                                SimEngine.AssessPosture(st);
+                            }
+                        },
+                        new() {
+                            Label = $"就地加固【{expName}】防禦工事並收縮前沿哨所",
+                            Hint = $"消耗補給 3；{expName}防禦工事 +1 級（滿級則守軍整補 +8%）",
+                            FactionTag = "army",
+                            Effect = st => {
+                                st.Supply = Math.Max(0, st.Supply - 3);
+                                int curF = SimEngine.FortificationLevel(st, expId);
+                                if (curF < 3) SimEngine.IncreaseFortification(st, expId);
+                                else foreach (var u in SimEngine.UnitsAt(st, expId, UnitDomain.Land)) u.Str = Math.Min(100, u.Str + 8);
+                                SimEngine.Log(st, $"【{expName}】前線完成防線收縮與反裝甲工事加固。", "good");
+                                SimEngine.AssessPosture(st);
+                            }
+                        },
+                        new() {
+                            Label = $"照會各國揭露{rName}集結動向，對【{ussrName}】施壓牽制",
+                            Hint = $"國際地位 +3；{ussrName}{rName}駐軍約 -10%",
+                            FactionTag = "intel",
+                            Effect = st => {
+                                st.Intl += 3;
+                                if (!string.IsNullOrEmpty(ussrTgt)) ChipHeld(st, new[] { ussrTgt }, 0.10);
+                                SimEngine.Log(st, $"國際輿論施壓莫斯科，牽制【{ussrName}】{rName}前進部署。", "good");
+                                SimEngine.AssessPosture(st);
+                            }
+                        }
+                    }
+                };
+            }
+
+            string expId2 = !string.IsNullOrEmpty(s.ExposedNodeId) ? s.ExposedNodeId : "HI";
+            string expZone = !string.IsNullOrEmpty(s.ExposedZoneId) ? s.ExposedZoneId : (GameData.Nodes[expId2].Zones.FirstOrDefault() ?? "Z4");
+            string expName2 = GameData.Nodes[expId2].Name;
+            string zName = GameData.Zones[expZone].Name;
+            string srcId2 = FindRearSourceFor(s, expId2, ctx);
+            string srcName2 = GameData.Nodes[srcId2].Name;
+            var cand2 = FindReinforceUnit(s, srcId2, expId2, out string failWhy2);
+            string retreatDest = FindRetreatDestFor(s, expId2, ctx);
+            string retreatName = GameData.Nodes[retreatDest].Name;
+            var naCand = SimEngine.FindNavalAirCandidate(s, expZone, "fleet", true)
+                      ?? SimEngine.FindNavalAirCandidate(s, expZone, "air", true);
+            var expLandUnits = SimEngine.UnitsAt(s, expId2, UnitDomain.Land).Where(u => !u.Moved).ToList();
+            bool canRetreat = expLandUnits.Count > 0 && expLandUnits.All(u => SimEngine.CheckMove(s, u, retreatDest).ok);
+
+            return new GameEvent
+            {
+                Id = $"dyn_posture_exp_{s.Year}_{s.Month}",
+                Year = s.Year, Month = s.Month, Day = s.Day, Tag = "態勢警訊",
+                Title = $"海空暴露：【{zName}】失掩下【{expName2}】防務吃緊",
+                Desc = $"海軍電偵顯示【{zName}】我方海空掩護薄弱，使【{expName2}】直接暴露於敵軍渡海／側翼威脅之下。統帥部須決定自【{srcName2}】抽兵增援、改派海空協防【{zName}】，或將駐軍收縮回【{retreatName}】。",
+                Choices = new List<EventChoice>
+                {
+                    new() {
+                        Label = cand2 != null ? $"自【{srcName2}】調派 1 師增援【{expName2}】固守" : $"自【{srcName2}】增援【{expName2}】（運力或兵力不足）",
+                        Hint = cand2 != null ? $"檢查移動後派遣 1 師自{srcName2}赴{expName2}，補給 -2" : $"無法調動：{failWhy2}",
+                        FactionTag = "army",
+                        Effect = st => {
+                            var u = FindReinforceUnit(st, srcId2, expId2, out string why);
+                            if (u != null && SimEngine.CheckMove(st, u, expId2).ok)
+                            {
+                                SimEngine.MoveNow(st, new[] { u.Id }, expId2, manual: true);
+                                st.Supply = Math.Max(0, st.Supply - 2);
+                            }
+                            else SimEngine.Log(st, $"增援【{expName2}】未能成行：{why}", "bad");
+                            SimEngine.AssessPosture(st);
+                        }
+                    },
+                    new() {
+                        Label = naCand != null ? $"將 1 支海空主力改駐【{zName}】重奪掩護" : $"改派海空進駐【{zName}】（無待命艦機）",
+                        Hint = naCand != null ? $"調派 {GameData.UnitTypes[naCand.Type].Name} 進駐{zName}，消除該區暴露態勢" : "目前無待命艦隊或航空聯隊可調",
+                        FactionTag = "navair",
+                        Effect = st => {
+                            var na = SimEngine.FindNavalAirCandidate(st, expZone, "fleet", true)
+                                  ?? SimEngine.FindNavalAirCandidate(st, expZone, "air", true);
+                            if (na != null && SimEngine.DeployNavalAir(st, na.Id, expZone).ok)
+                                SimEngine.Log(st, $"⚓ 已調派{GameData.UnitTypes[na.Type].Name}進駐【{zName}】掩護【{expName2}】。", "good");
+                            else
+                                SimEngine.Log(st, $"改駐【{zName}】未執行：無待命海空單位。", "bad");
+                            SimEngine.AssessPosture(st);
+                        }
+                    },
+                    new() {
+                        Label = canRetreat ? $"收縮防線，將【{expName2}】守軍撤回【{retreatName}】" : $"收縮【{expName2}】駐軍（無待命可撤部隊）",
+                        Hint = canRetreat ? $"依 CheckMove 撤回{expName2}駐軍至{retreatName}（保留主權與零敵軍），補給 +4" : $"目前{expName2}無可立即撤回之待命部隊",
+                        FactionTag = "econ",
+                        Effect = st => {
+                            var list = SimEngine.UnitsAt(st, expId2, UnitDomain.Land)
+                                .Where(u => !u.Moved && SimEngine.CheckMove(st, u, retreatDest).ok)
+                                .Select(u => u.Id)
+                                .ToList();
+                            if (list.Count > 0)
+                            {
+                                SimEngine.MoveNow(st, list, retreatDest, manual: true);
+                                st.Supply += 4;
+                                SimEngine.Log(st, $"我軍收縮【{expName2}】駐軍轉進【{retreatName}】保存實力。", "good");
+                            }
+                            else
+                            {
+                                SimEngine.Log(st, $"【{expName2}】目前無可撤離之待命部隊。", "bad");
+                            }
+                            SimEngine.AssessPosture(st);
+                        }
+                    }
+                }
+            };
+        }
+
+        private static GameEvent BuildWindowPostureEvent(GameState s, FrontlineContext ctx)
+        {
+            string zId = !string.IsNullOrEmpty(s.WindowZoneId) ? s.WindowZoneId : ctx.PrimaryZoneId;
+            string tgtId = !string.IsNullOrEmpty(s.WindowTargetId) ? s.WindowTargetId : (ctx.PrcFrontNodes.FirstOrDefault() ?? "FJ");
+            string zName = GameData.Zones[zId].Name;
+            string tgtName = GameData.Nodes[tgtId].Name;
+            int assetCount = SimEngine.UnitsAt(s, zId, UnitDomain.Sea).Count + SimEngine.UnitsAt(s, zId, UnitDomain.Air).Count;
+            double supCost = Math.Clamp(assetCount * 1.5, 2.0, 6.0);
+
+            bool northWithUssr = ctx.Theater == FrontlineTheater.NorthChinaPlain && ctx.UssrNodes.Count > 0;
+            string northTarget = northWithUssr
+                ? GameData.MainlandIds.FirstOrDefault(id => s.Control[id] == Faction.ROC && GameData.Nodes[id].Adj.Any(a => s.Control[a] == Faction.USSR))
+                : null;
+            string northSrc = !string.IsNullOrEmpty(northTarget) ? FindRearSourceFor(s, northTarget, ctx) : null;
+            Unit northUnit = !string.IsNullOrEmpty(northTarget) && !string.IsNullOrEmpty(northSrc)
+                ? FindReinforceUnit(s, northSrc, northTarget, out _)
+                : null;
+
+            return new GameEvent
+            {
+                Id = $"dyn_posture_win_{s.Year}_{s.Month}",
+                Year = s.Year, Month = s.Month, Day = s.Day, Tag = "戰略窗口",
+                Title = $"戰略窗口：【{zName}】優勢成形・直指【{tgtName}】",
+                Desc = $"我方在【{zName}】已壓倒敵方海空兵力，【{tgtName}】沿岸防線出現短暫窗口。是要發動聯合破襲打開登陸戰機、實施近岸封鎖，或是按兵整補？",
+                Choices = new List<EventChoice>
+                {
+                    new() {
+                        Label = $"趁【{zName}】優勢對【{tgtName}】發動海空聯合破襲",
+                        Hint = $"按參戰規模消耗補給 {supCost:F1}；削弱{tgtName}約 10% 守軍（不改控制方），並開啟{zName}登陸窗口 2 個月（登陸戰力 +8%）",
+                        FactionTag = "navair",
+                        Effect = st => {
+                            st.Supply = Math.Max(0, st.Supply - supCost);
+                            ChipHeld(st, new[] { tgtId }, 0.10);
+                            st.Flags["winBonus_" + zId] = st.TotalMonths + 2;
+                            SimEngine.Log(st, $"★ 我軍趁【{zName}】海空優勢破襲【{tgtName}】，打開為期兩個月的跨海登陸窗口！", "good");
+                        }
+                    },
+                    northWithUssr && northUnit != null
+                        ? new EventChoice {
+                            Label = $"抽調【{GameData.Nodes[northSrc].Name}】1 師北上協防【{GameData.Nodes[northTarget].Name}】抗俄",
+                            Hint = $"趁華北沿海優勢抽兵強化北疆邊防（{GameData.Nodes[northSrc].Name}→{GameData.Nodes[northTarget].Name}）",
+                            FactionTag = "army",
+                            Effect = st => {
+                                var u = FindReinforceUnit(st, northSrc, northTarget, out string why);
+                                if (u != null && SimEngine.CheckMove(st, u, northTarget).ok)
+                                    SimEngine.MoveNow(st, new[] { u.Id }, northTarget, manual: true);
+                                else
+                                    SimEngine.Log(st, $"北疆抽調未執行：{why}", "bad");
+                            }
+                        }
+                        : new EventChoice {
+                            Label = $"嚴密海上封鎖【{tgtName}】航道，壓迫敵後民心",
+                            Hint = $"{tgtName}動盪 +12；{zName}出勤艦隊耐久略降 -4%",
+                            FactionTag = "intel",
+                            Effect = st => {
+                                if (st.Control[tgtId] == Faction.PRC)
+                                    st.Unrest[tgtId] = SimEngine.Clamp(st.Unrest[tgtId] + 12, 0, 100);
+                                var fl = SimEngine.UnitsAt(st, zId, UnitDomain.Sea).FirstOrDefault();
+                                if (fl != null) fl.Str = Math.Max(25, fl.Str - 4);
+                                SimEngine.Log(st, $"我軍封鎖【{tgtName}】近岸航線，當地民心浮動加劇。", "good");
+                            }
+                        },
+                    new() {
+                        Label = $"按兵待命，保留【{zName}】海空編隊休整",
+                        Hint = $"不耗補給，{zName}海空兵力恢復 +3%；共軍將依常態增補填上此處空隙",
+                        FactionTag = "econ",
+                        Effect = st => {
+                            foreach (var u in SimEngine.UnitsAt(st, zId, UnitDomain.Sea).Concat(SimEngine.UnitsAt(st, zId, UnitDomain.Air)))
+                                u.Str = Math.Min(100, u.Str + 3);
+                            st.FrontHeadlineKind = "quiet";
+                            st.FrontHeadline = $"態勢轉變：我方按兵未動，共軍正增補【{tgtName}】防務填補窗口。";
+                            SimEngine.Log(st, $"我軍暫緩對【{tgtName}】出擊，海空編隊完成整補。", "");
+                        }
+                    }
+                }
+            };
         }
     }
 }

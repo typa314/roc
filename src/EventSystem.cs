@@ -397,7 +397,7 @@ namespace RocGame
                         Hint = "中共穩定度 -15、敵區全境民心浮動 +15、兩棲登陸加成 +10%",
                         Stance = "整備反攻", StyleTag = "gold",
                         Effect = s => {
-                            s.PrcStab -= 15; s.PrcGdpMod = 0.84; s.LandingBonus += 0.10;
+                            ShockPrc(s, 15); s.PrcGdpMod = 0.84; s.LandingBonus += 0.10;
                             foreach (var id in GameData.MainlandIds) if (s.Control[id] == Faction.PRC) s.Unrest[id] += 15;
                             SimEngine.Log(s, "大陸深陷三年困難時期，我方成立國光作業室，積極籌劃反攻作戰！", "good");
                         }
@@ -409,7 +409,7 @@ namespace RocGame
                         Effect = s => {
                             var ctx = AnalyzeFrontline(s);
                             string milSpawn = ctx.RocFrontNodes.Count > 0 ? ctx.RocFrontNodes[0] : (s.Control["KM"] == Faction.ROC ? "KM" : ctx.PickForwardRocNode(s));
-                            s.PrcStab -= 12; s.PrcGdpMod = 0.84; s.Manpower += 3;
+                            ShockPrc(s, 12); s.PrcGdpMod = 0.84; s.Manpower += 3;
                             SimEngine.AddUnit(s, "mil", milSpawn, 85);
                             SimEngine.AddUnit(s, "dfc", ctx.PickForwardRocNode(s), 85);
                             foreach (var id in GameData.MainlandIds) if (s.Control[id] == Faction.PRC) s.Unrest[id] += 10;
@@ -422,7 +422,7 @@ namespace RocGame
                         Stance = "情報滲透", StyleTag = "purple",
                         Effect = s => {
                             s.Treasury = Math.Max(0, s.Treasury - 1.2);
-                            s.PrcStab -= 18; s.PrcGdpMod = 0.82;
+                            ShockPrc(s, 18); s.PrcGdpMod = 0.82;
                             foreach (var id in PickFromPreferredOrFront(s, new[] { "FJ", "ZJ", "GD", "GX", "JX", "AH", "HA", "HB", "HN" }, 7, Faction.PRC))
                             {
                                 s.Unrest[id] += 22;
@@ -546,7 +546,7 @@ namespace RocGame
                         Stance = "全面反攻備戰", StyleTag = "red",
                         Effect = s => {
                             var ctx = AnalyzeFrontline(s);
-                            s.PrcStab -= 22; s.PrcGdpMod = 0.80; s.PrcTechMod *= 0.9; s.PrcReinfMod = 0.55;
+                            ShockPrc(s, 22); s.PrcGdpMod = 0.80; s.PrcTechMod *= 0.9; s.PrcReinfMod = 0.55;
                             s.UsConsent = Math.Max(s.UsConsent, 3);
                             foreach (var id in GameData.MainlandIds) if (s.Control[id] == Faction.PRC) { s.Unrest[id] += 20; s.Garrison[id] *= 0.80; }
                             SimEngine.AddUnit(s, "dfc", ctx.PickForwardRocNode(s), 85);
@@ -558,7 +558,7 @@ namespace RocGame
                         Hint = "中共穩定度 -15；台灣民心 +10、經濟效率 +6%、研發點數 +6",
                         Stance = "文化與經濟建設", StyleTag = "blue",
                         Effect = s => {
-                            s.PrcStab -= 15; s.PrcGdpMod = 0.82; s.PrcReinfMod = 0.7;
+                            ShockPrc(s, 15); s.PrcGdpMod = 0.82; s.PrcReinfMod = 0.7;
                             s.Morale += 10; s.EconMult += 0.06; s.ResearchProg += 6;
                             foreach (var id in GameData.MainlandIds) if (s.Control[id] == Faction.PRC) s.Unrest[id] += 12;
                             SimEngine.Log(s, "大陸陷入十年動亂，台灣推行中華文化復興運動並加速經濟起飛。", "good");
@@ -571,7 +571,7 @@ namespace RocGame
                         Effect = s => {
                             var ctx = AnalyzeFrontline(s);
                             s.Treasury = Math.Max(0, s.Treasury - 2.0);
-                            s.PrcStab -= 18; s.PrcGdpMod = 0.82; s.PrcReinfMod = 0.62;
+                            ShockPrc(s, 18); s.PrcGdpMod = 0.82; s.PrcReinfMod = 0.62;
                             foreach (var id in PickFromPreferredOrFront(s, new[] { "SD", "JS", "ZJ", "FJ", "GD", "GX" }, 6, Faction.PRC))
                             {
                                 s.Garrison[id] *= 0.78;
@@ -790,7 +790,7 @@ namespace RocGame
                         Hint = "中共穩定度 -18、敵區民心浮動 +18；前線獲得 2 支投誠部隊",
                         Stance = "策反起義", StyleTag = "purple",
                         Effect = s => {
-                            s.PrcStab -= 18; s.Intl += 6;
+                            ShockPrc(s, 18); s.Intl += 6;
                             foreach (var id in GameData.MainlandIds) if (s.Control[id] == Faction.PRC) s.Unrest[id] += 18;
                             string spawn = AnalyzeFrontline(s).PickForwardRocNode(s);
                             SimEngine.AddUnit(s, "dfc", spawn, 85); SimEngine.AddUnit(s, "dfc", spawn, 85);
@@ -802,7 +802,7 @@ namespace RocGame
                         Hint = "中共穩定度 -12；台灣 GDP +8%、美國關係 +8、國際地位 +8",
                         Stance = "經濟與外交吸資", StyleTag = "blue",
                         Effect = s => {
-                            s.PrcStab -= 12; s.Gdp *= 1.08; s.UsRel += 8; s.Intl += 8;
+                            ShockPrc(s, 12); s.Gdp *= 1.08; s.UsRel += 8; s.Intl += 8;
                             SimEngine.Log(s, "外資轉向台灣，我國國際空間與高科技產業顯著成長。", "good");
                         }
                     },
@@ -1222,6 +1222,7 @@ namespace RocGame
                     Hint = c.Hint,
                     Stance = c.Stance,
                     StyleTag = c.StyleTag,
+                    FactionTag = c.FactionTag,
                     Effect = c.Effect
                 }).ToList()
             };

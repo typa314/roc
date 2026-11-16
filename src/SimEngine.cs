@@ -113,6 +113,7 @@ namespace RocGame
         public string Hint { get; set; }
         public string Stance { get; set; }
         public string StyleTag { get; set; }
+        public string FactionTag { get; set; }
         [JsonIgnore]
         public Action<GameState> Effect { get; set; }
     }
@@ -230,6 +231,13 @@ namespace RocGame
         public double RocLoss { get; set; }
         public double EnemyLoss { get; set; }
 
+        public string FrontHeadline { get; set; } = "";
+        public string FrontHeadlineKind { get; set; } = "quiet"; // "threat" | "window" | "quiet"
+        public string ExposedZoneId { get; set; } = "";
+        public string ExposedNodeId { get; set; } = "";
+        public string WindowZoneId { get; set; } = "";
+        public string WindowTargetId { get; set; } = "";
+
         public int GetFlag(string k) => Flags.TryGetValue(k, out int v) ? v : 0;
         public bool HasFlag(string k) => GetFlag(k) > 0;
     }
@@ -297,6 +305,7 @@ namespace RocGame
             s.Flags["hiQiongya"] = 1;
 
             RollFog(s);
+            AssessPosture(s);
             s.History.Add(Snapshot(s));
             Log(s, "1950年國府播遷來台，黃金存底僅餘約1.25億美元；本島亟待整編、舟山與海南孤懸海外且補給線逾千公里，是否收縮防線或跨海固守由統帥決斷。", "big");
             SampleIntelReports(s, isOpening: true);
@@ -1853,6 +1862,12 @@ namespace RocGame
             s.PendingEvents ??= new();
             s.Techs ??= new();
             s.Units ??= new();
+            s.FrontHeadline ??= "";
+            if (string.IsNullOrEmpty(s.FrontHeadlineKind)) s.FrontHeadlineKind = "quiet";
+            s.ExposedZoneId ??= "";
+            s.ExposedNodeId ??= "";
+            s.WindowZoneId ??= "";
+            s.WindowTargetId ??= "";
             s.ResearchProgMap ??= new();
             s.ActiveTechs ??= new();
             s.ResearchQueue ??= new();
@@ -1899,6 +1914,131 @@ namespace RocGame
             }
         }
 
+        private static bool IsIslandOppositeHostile(GameState s, string islandId)
+        {
+            if (s.Garrison.GetValueOrDefault(islandId, 0) > 0.01) return true;
+            return islandId switch
+            {
+                "HI" => s.Control.GetValueOrDefault("GD") != Faction.ROC,
+                "KM" or "MZ" => s.Control.GetValueOrDefault("FJ") != Faction.ROC,
+                "DC" => s.Control.GetValueOrDefault("ZJ") != Faction.ROC,
+                "ZS" => s.Control.GetValueOrDefault("JS") != Faction.ROC || s.Control.GetValueOrDefault("ZJ") != Faction.ROC,
+                "PH" => s.Control.GetValueOrDefault("FJ") != Faction.ROC && s.Control.GetValueOrDefault("GD") != Faction.ROC,
+                _ => false
+            };
+        }
+
+        public static void AssessPosture(GameState s)
+        {
+            if (s == null) return;
+            s.ExposedZoneId = "";
+            s.ExposedNodeId = "";
+            s.WindowZoneId = "";
+            s.WindowTargetId = "";
+
+            var prcMainland = GameData.MainlandIds.Where(id => s.Control.GetValueOrDefault(id) == Faction.PRC).ToList();
+            var ussrNodes = UssrNodes(s);
+            if (prcMainland.Count == 0 && ussrNodes.Count > 0)
+            {
+                string thinFront = null;
+                foreach (var uId in ussrNodes)
+                {
+                    foreach (var adj in GameData.Nodes[uId].Adj)
+                    {
+                        if (s.Control.GetValueOrDefault(adj) != Faction.ROC) continue;
+                        double rocS = LandStr(UnitsAt(s, adj, UnitDomain.Land));
+                        if (rocS < s.Garrison.GetValueOrDefault(uId, 0) * 0.85)
+                        {
+                            thinFront = adj;
+                            break;
+                        }
+                    }
+                    if (thinFront != null) break;
+                }
+                if (thinFront != null)
+                {
+                    s.ExposedNodeId = thinFront;
+                    s.FrontHeadlineKind = "threat";
+                    s.FrontHeadline = $"北疆警訊：{GameData.Nodes[thinFront].Name}正面承受俄軍重壓，邊境防線兵力吃緊！";
+                }
+                else
+                {
+                    s.FrontHeadlineKind = "quiet";
+                    s.FrontHeadline = "北疆態勢：塞外邊防各就各位，雙方沿邊境對峙警戒。";
+                }
+                return;
+            }
+
+            var ctx = EventSystem.AnalyzeFrontline(s);
+            string[] zoneScanOrder = ctx.ContestedZones.Count > 0
+                ? ctx.ContestedZones.Concat(new[] { "Z4", "Z2", "Z3", "Z1" }).Distinct().ToArray()
+                : new[] { "Z4", "Z2", "Z3", "Z1" };
+
+            foreach (var z in zoneScanOrder)
+            {
+                double prcSa = PrcSea(s, z) + PrcAir(s, z);
+                double rocSa = RocSea(s, z) + RocAir(s, z);
+
+                if (string.IsNullOrEmpty(s.ExposedNodeId) && prcSa >= rocSa)
+                {
+                    string exp = null;
+                    if (ctx.HeldMainland.Count > 0)
+                    {
+                        exp = ctx.RocFrontNodes.FirstOrDefault(id => GameData.Nodes[id].Zones.Contains(z) && GameData.Nodes[id].Port);
+                        if (exp == null)
+                        {
+                            var prcInZone = ctx.PrcFrontNodes.FirstOrDefault(id => GameData.Nodes[id].Zones.Contains(z));
+                            if (prcInZone != null)
+                                exp = GameData.Nodes[prcInZone].Adj.FirstOrDefault(a => s.Control.GetValueOrDefault(a) == Faction.ROC);
+                        }
+                    }
+                    if (exp == null)
+                    {
+                        exp = new[] { "HI", "ZS", "DC", "KM", "MZ", "PH" }
+                            .FirstOrDefault(id => s.Control.GetValueOrDefault(id) == Faction.ROC
+                                                  && GameData.Nodes[id].Zones.Contains(z)
+                                                  && IsIslandOppositeHostile(s, id));
+                    }
+                    if (!string.IsNullOrEmpty(exp))
+                    {
+                        s.ExposedZoneId = z;
+                        s.ExposedNodeId = exp;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(s.WindowTargetId) && rocSa >= Math.Max(5.0, prcSa * 1.25))
+                {
+                    string tgt = ctx.PrcFrontNodes.FirstOrDefault(id => GameData.Nodes[id].Zones.Contains(z))
+                              ?? prcMainland.FirstOrDefault(id => GameData.Nodes[id].Zones.Contains(z));
+                    if (!string.IsNullOrEmpty(tgt))
+                    {
+                        s.WindowZoneId = z;
+                        s.WindowTargetId = tgt;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(s.ExposedNodeId))
+            {
+                string zName = string.IsNullOrEmpty(s.ExposedZoneId) ? "前線" : GameData.Zones[s.ExposedZoneId].Name;
+                string nName = GameData.Nodes[s.ExposedNodeId].Name;
+                s.FrontHeadlineKind = "threat";
+                s.FrontHeadline = $"海空暴露：{zName}制海制空失掩，【{nName}】暴露於敵前威脅！";
+            }
+            else if (!string.IsNullOrEmpty(s.WindowTargetId))
+            {
+                string zName = GameData.Zones[s.WindowZoneId].Name;
+                string nName = GameData.Nodes[s.WindowTargetId].Name;
+                s.FrontHeadlineKind = "window";
+                s.FrontHeadline = $"戰略窗口：{zName}海空優勢成形，對【{nName}】出現可乘之隙！";
+            }
+            else
+            {
+                s.FrontHeadlineKind = "quiet";
+                s.FrontHeadline = "態勢均衡：四大海域防務平衡，前線維持對峙警戒。";
+            }
+        }
+
         // ---------- 戰鬥結算 ----------
         private static double EnemyPowerAt(GameState s, string nid, double force, bool defending)
         {
@@ -1924,7 +2064,11 @@ namespace RocGame
             {
                 var T = GameData.UnitTypes[u.Type];
                 double v = (u.Str / 100.0) * (attacking ? T.Atk : T.Def) * (u.Type == "mil" ? 1.0 : tech) * u.SupFactor * (1.0 + u.Exp * 0.05);
-                if (landedIds.Contains(u.Id)) v *= (0.68 + s.LandingBonus + (T.Marine ? 0.22 : 0.0));
+                if (landedIds.Contains(u.Id))
+                {
+                    double winBon = n.Zones.Any(z => s.GetFlag("winBonus_" + z) >= s.TotalMonths) ? 0.08 : 0.0;
+                    v *= (0.68 + s.LandingBonus + winBon + (T.Marine ? 0.22 : 0.0));
+                }
                 p += v;
             }
             double fort = !attacking ? 1.0 + 0.3 * FortificationLevel(s, nid) : 1.0;
@@ -2388,6 +2532,7 @@ namespace RocGame
             RollFog(s);
             Normalize(s);
             TouchFrontClock(s);
+            AssessPosture(s);
             s.LastReport = rep;
         }
 

@@ -2132,6 +2132,28 @@ namespace RocGame
                 g.DrawString(legend, legFont, legTxtBr, lRect.X + 9, lRect.Y + 4);
             }
 
+            if (!string.IsNullOrEmpty(State?.FrontHeadline))
+            {
+                using var hlFont = new Font("Microsoft JhengHei UI", Math.Clamp(8.2f * uiScale, 7.6f, 8.6f), FontStyle.Bold);
+                string kind = State.FrontHeadlineKind;
+                Color hlBg = kind == "threat" ? Color.FromArgb(216, 62, 28, 28)
+                           : kind == "window" ? Color.FromArgb(216, 26, 56, 38)
+                           : Color.FromArgb(204, 30, 27, 22);
+                Color hlBorder = kind == "threat" ? Color.FromArgb(224, 212, 82, 72)
+                               : kind == "window" ? Color.FromArgb(220, 92, 186, 124)
+                               : GoldDim;
+                Color hlInk = kind == "threat" ? Color.FromArgb(250, 238, 198, 192)
+                            : kind == "window" ? Color.FromArgb(226, 246, 224)
+                            : TextMain;
+                var hsz = g.MeasureString(State.FrontHeadline, hlFont);
+                float hw = Math.Clamp(hsz.Width + 28f, 260f, Math.Max(260f, fullRect.Width - 40f));
+                var hRect = new RectangleF((fullRect.Width - hw) * 0.5f, 36, hw, 22);
+                WarGdi.DrawPlaqueFrame(g, hRect, 5f, hlBg, hlBorder, Color.FromArgb(46, 40, 32));
+                using var hlBr = new SolidBrush(hlInk);
+                using var hlFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+                g.DrawString(State.FrontHeadline, hlFont, hlBr, hRect, hlFmt);
+            }
+
             DrawMapZoomBar(g, fullRect);
 
             if (_leftDragCommand && _leftDragSource != null && GameData.Nodes.TryGetValue(_leftDragSource, out var leftDragSrcNode))
