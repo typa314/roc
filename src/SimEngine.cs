@@ -135,6 +135,7 @@ namespace RocGame
 
     public class GameState
     {
+        public int SchemaVersion { get; set; } = 2;
         public uint Seed { get; set; }
         public int Year { get; set; } = GameData.StartYear;
         public int Month { get; set; } = 1;
@@ -1839,6 +1840,19 @@ namespace RocGame
 
         public static void Normalize(GameState s)
         {
+            s.SchemaVersion = 2;
+            s.Flags ??= new();
+            s.FiredEvents ??= new();
+            s.Cooldowns ??= new();
+            s.ActionsUsed ??= new();
+            s.Orders ??= new();
+            s.PriorityTargets ??= new();
+            s.Logs ??= new();
+            s.IntelReports ??= new();
+            s.History ??= new();
+            s.PendingEvents ??= new();
+            s.Techs ??= new();
+            s.Units ??= new();
             s.ResearchProgMap ??= new();
             s.ActiveTechs ??= new();
             s.ResearchQueue ??= new();

@@ -12,6 +12,22 @@ namespace RocGame
         [STAThread]
         static int Main(string[] args)
         {
+            if (args.Contains("--sim"))
+            {
+                try
+                {
+                    int rc = BatchSim.RunCli(args);
+                    Environment.Exit(rc);
+                    return rc;
+                }
+                catch (Exception ex)
+                {
+                    File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "sim_error.txt"), ex.ToString());
+                    Environment.Exit(1);
+                    return 1;
+                }
+            }
+
             if (args.Contains("--test"))
             {
                 try

@@ -11,15 +11,15 @@ namespace RocGame
             HistoricalEvents.AddRange(CreateLateEvents());
         }
 
-        static bool AnyPrc(GameState s) => GameData.MainlandIds.Any(id => s.Control[id] == Faction.PRC);
+        internal static bool AnyPrc(GameState s) => GameData.MainlandIds.Any(id => s.Control[id] == Faction.PRC);
 
-        static double PrcRemainFrac(GameState s)
+        internal static double PrcRemainFrac(GameState s)
         {
             int n = GameData.MainlandIds.Count(id => s.Control[id] == Faction.PRC);
             return n / (double)Math.Max(1, GameData.MainlandIds.Length);
         }
 
-        static List<string> CurrentPrcFront(GameState s, int max)
+        internal static List<string> CurrentPrcFront(GameState s, int max)
         {
             var ctx = AnalyzeFrontline(s);
             var ids = ctx.HostileFrontNodes.Where(id => s.Control.TryGetValue(id, out var f) && f == Faction.PRC).Take(max).ToList();
@@ -28,10 +28,10 @@ namespace RocGame
             return ids;
         }
 
-        static void ChipFront(GameState s, double frac, int max = 2)
+        internal static void ChipFront(GameState s, double frac, int max = 2)
             => ChipHeld(s, CurrentPrcFront(s, max), frac);
 
-        static void ChipHeld(GameState s, IEnumerable<string> ids, double frac)
+        internal static void ChipHeld(GameState s, IEnumerable<string> ids, double frac)
         {
             foreach (var id in ids)
             {
@@ -43,7 +43,7 @@ namespace RocGame
             }
         }
 
-        static void AlertFront(GameState s, double mult, int max = 2)
+        internal static void AlertFront(GameState s, double mult, int max = 2)
         {
             foreach (var id in CurrentPrcFront(s, max))
             {
@@ -52,7 +52,7 @@ namespace RocGame
             }
         }
 
-        static bool MoveOneFleet(GameState s, string zone)
+        internal static bool MoveOneFleet(GameState s, string zone)
         {
             if (!GameData.Zones.ContainsKey(zone)) return false;
             var fleet = s.Units.FirstOrDefault(u => u.Type == "fleet" && u.Loc != zone)
@@ -62,31 +62,31 @@ namespace RocGame
             return true;
         }
 
-        static void TireLand(GameState s, int loss, int floor = 40)
+        internal static void TireLand(GameState s, int loss, int floor = 40)
         {
             foreach (var u in s.Units.Where(u => GameData.UnitTypes[u.Type].Domain == UnitDomain.Land))
                 u.Str = Math.Max(floor, u.Str - loss);
         }
 
-        static void ShockPrc(GameState s, double fullDrop)
+        internal static void ShockPrc(GameState s, double fullDrop)
         {
             double scale = 0.35 + 0.65 * PrcRemainFrac(s);
             s.PrcStab -= fullDrop * scale;
         }
 
-        static void RaiseFrontUnrest(GameState s, double amount, int max = 3)
+        internal static void RaiseFrontUnrest(GameState s, double amount, int max = 3)
         {
             foreach (var id in CurrentPrcFront(s, max))
                 s.Unrest[id] = SimEngine.Clamp(s.Unrest[id] + amount, 0, 100);
         }
 
-        static string FrontPhrase(GameState s)
+        internal static string FrontPhrase(GameState s)
         {
             var ctx = AnalyzeFrontline(s);
             return $"{ctx.TheaterTitle}（{ctx.FrontNames(2)}）";
         }
 
-        static void Retitle(GameEvent ev, GameState s, string title, string desc)
+        internal static void Retitle(GameEvent ev, GameState s, string title, string desc)
         {
             ev.Title = title;
             ev.Desc = desc.Replace("{front}", FrontPhrase(s));
