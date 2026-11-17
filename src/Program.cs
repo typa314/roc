@@ -1288,6 +1288,8 @@ namespace RocGame
                 Assert(dipBtn == null, "底部導航列應已完全移除外交政策抽屜按鈕");
                 Assert(!HasButtonWithText(form5d, "外交心戰") && !HasControlWithText(form5d, "外交戰略行動"),
                     "主介面不應存在任何外交政策頁面或抽屜元件");
+                Assert(FindButtonWithText(form5d, "戰報日誌") == null, "主介面不應存在戰報日誌按鈕或入口");
+                Assert(FindButtonWithText(form5d, "兩岸國力") == null, "主介面不應存在兩岸國力按鈕（僅於遊戲結算時呈現）");
                 form5d.ShowHudTooltipForTest("treasury");
                 Application.DoEvents();
                 Assert(HasControlWithText(form5d, "War Bonds") && HasControlWithText(form5d, "佔 GDP 18%"),
@@ -1300,8 +1302,7 @@ namespace RocGame
                 form5d.ShowHudTooltipForTest(null);
                 foreach (var drawer in new[]
                 {
-                    (ButtonText: "建軍後勤", FileName: "ui_build_drawer_snapshot.png"),
-                    (ButtonText: "兩岸國力", FileName: "ui_chart_drawer_snapshot.png")
+                    (ButtonText: "建軍後勤", FileName: "ui_build_drawer_snapshot.png")
                 })
                 {
                     var drawerButton = FindButtonWithText(form5d, drawer.ButtonText);

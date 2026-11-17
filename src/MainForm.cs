@@ -50,7 +50,7 @@ namespace RocGame
         private readonly HashSet<string> _selectedMutators = new();
         private readonly Dictionary<string, Button> _mutatorBtns = new();
 
-        // 隨選右側戰情抽屜狀態："none" | "build" | "tech" | "chart" | "intel"
+        // 隨選右側戰情抽屜狀態："none" | "build"
         private string _activeDrawer = "none";
         private string _buildLoc = "TW";
 
@@ -124,7 +124,6 @@ namespace RocGame
         private Label _drawerTitleLbl;
         private DarkScrollContainer _drawerScrollWrap;
         private Panel _drawerScrollBody;
-        private BufferedPanel _drawerChartBody;
 
         // 事件、結局與標題遮罩
         private WarRoomPanel _eventOverlay;
@@ -577,7 +576,6 @@ namespace RocGame
             var newKeys = SimEngine.EvaluateCheckpoints(State, _checkpoints);
             if (_checkpoints.Count > 0) SaveCheckpoints();
             if (_titleOverlay != null) RefreshTitleOverlay();
-            if (newKeys.Count > 0 && _activeDrawer == "intel") RefreshDrawerContent();
         }
 
         public bool StartFromCheckpoint(string cpKey)
@@ -692,9 +690,7 @@ namespace RocGame
             {
                 ("build", "⚔ 建軍後勤"),
                 ("tech",  "⚙ 科技樹"),
-                ("mi",    "◎ 軍情處"),
-                ("chart", "▤ 兩岸國力"),
-                ("intel", "★ 戰報日誌")
+                ("mi",    "◎ 軍情處")
             };
             int dx = 14;
             foreach (var (key, label) in drawerSpecs)
@@ -808,7 +804,8 @@ namespace RocGame
 
         private void LayoutDockBar()
         {
-            int startX = 710;
+            int lastBtnRight = _drawerBtns.Values.Count > 0 ? _drawerBtns.Values.Max(b => b.Right) : 360;
+            int startX = Math.Max(380, lastBtnRight + 20);
             _lblDockTech.Location = new Point(startX, 8);
             _lblDockTech.Width = Math.Max(120, _dockBar.Width - startX - 16);
         }
@@ -1134,16 +1131,7 @@ namespace RocGame
             };
             _drawerScrollWrap.SetContent(_drawerScrollBody);
 
-            _drawerChartBody = new BufferedPanel
-            {
-                Location = new Point(10, 42),
-                Size = new Size(426, 566),
-                BackColor = BgPanel,
-                Visible = false
-            };
-            _drawerChartBody.Paint += DrawerChartBody_Paint;
-
-            _drawerPanel.Controls.AddRange(new Control[] { _drawerTitleLbl, btnClose, _drawerScrollWrap, _drawerChartBody });
+            _drawerPanel.Controls.AddRange(new Control[] { _drawerTitleLbl, btnClose, _drawerScrollWrap });
         }
 
         private void LayoutFloatingMapPanels()
@@ -1176,7 +1164,6 @@ namespace RocGame
                 _drawerPanel.Location = new Point(_mapPanel.Width - dw - 12, 12);
                 _drawerScrollWrap.Size = new Size(dw - 20, dh - 52);
                 _drawerScrollBody.Width = _drawerScrollWrap.ViewportWidth;
-                _drawerChartBody.Size = new Size(dw - 20, dh - 52);
             }
 
             LayoutIntelPageOverlay();
@@ -3498,16 +3485,6 @@ namespace RocGame
         {
             if (!_drawerPanel.Visible || _activeDrawer == "none") return;
 
-            if (_activeDrawer == "chart")
-            {
-                _drawerTitleLbl.Text = "▤ 兩岸國力演變與戰果總覽";
-                _drawerScrollWrap.Visible = false;
-                _drawerChartBody.Visible = true;
-                _drawerChartBody.Invalidate();
-                return;
-            }
-
-            _drawerChartBody.Visible = false;
             _drawerScrollWrap.Visible = true;
             _drawerScrollBody.SuspendLayout();
             _drawerScrollBody.Controls.Clear();
@@ -3516,7 +3493,6 @@ namespace RocGame
             _drawerScrollBody.Width = _drawerScrollWrap.ViewportWidth;
 
             if (_activeDrawer == "build") RenderBuildDrawer(cw);
-            else if (_activeDrawer == "intel") RenderIntelDrawer(cw);
 
             int maxBottom = 0;
             foreach (Control c in _drawerScrollBody.Controls)
@@ -3740,142 +3716,6 @@ namespace RocGame
             }
         }
 
-        private void RenderIntelDrawer(int cw)
-        {
-            _drawerTitleLbl.Text = "★ 統帥部戰報與參謀派系";
-            int y = 4;
-
-            var councilCard = new BufferedPanel
-            {
-                Location = new Point(4, y),
-                Size = new Size(cw, 130),
-                BackColor = BgCard
-            };
-            councilCard.Paint += (_, pe) =>
-            {
-                var g = pe.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-                WarGdi.DrawPlaqueFrame(g, new RectangleF(0.5f, 0.5f, councilCard.Width - 2f, councilCard.Height - 2f), 5f, BgCard, BorderCol, Color.FromArgb(46, 40, 31));
-                using var hdrF = new Font("Microsoft JhengHei UI", 8.6f, FontStyle.Bold);
-                using var subF = new Font("Microsoft JhengHei UI", 7.8f);
-                using var goldBr = new SolidBrush(GoldCol);
-                using var subBr = new SolidBrush(TextSub);
-                using var txtBr = new SolidBrush(TextMain);
-
-                string domKey = SimEngine.DominantStaffFaction(State);
-                var domSpec = SimEngine.StaffFactions.FirstOrDefault(x => x.Key == domKey);
-                string hdrText = string.IsNullOrEmpty(domKey)
-                    ? "◆ 參謀本部四派均衡（任一派系 ≥ 55 取得主導加成）"
-                    : $"◆ 主導：{domSpec.Name}（{domSpec.BonusDesc}）";
-                g.DrawString(hdrText, hdrF, goldBr, 10, 7);
-
-                if (!string.IsNullOrEmpty(State.ActiveDirectiveName))
-                    g.DrawString($"國策：{State.ActiveDirectiveName}（至 {State.DirectiveEndYear} 年）", subF, subBr, 10, 26);
-                else
-                    g.DrawString("幕僚長意見隨事件與國策抉擇消長；冷落滿兩年將引發反彈", subF, subBr, 10, 26);
-
-                Color[] fCols =
-                {
-                    Color.FromArgb(196, 138, 72),
-                    Color.FromArgb(88, 152, 206),
-                    Color.FromArgb(164, 108, 192),
-                    Color.FromArgb(98, 176, 118)
-                };
-                int rowY = 47;
-                for (int fi = 0; fi < SimEngine.StaffFactions.Length; fi++)
-                {
-                    var sp = SimEngine.StaffFactions[fi];
-                    double val = State.FactionInfluence?.GetValueOrDefault(sp.Key, 50.0) ?? 50.0;
-                    bool isDom = sp.Key == domKey;
-                    g.DrawString(isDom ? $"★{sp.Name}" : $"  {sp.Name}", subF, isDom ? goldBr : txtBr, 8, rowY);
-                    var barR = new RectangleF(84, rowY + 3, Math.Max(60, councilCard.Width - 134), 9);
-                    using (var bgBr = new SolidBrush(Color.FromArgb(24, 21, 17)))
-                    using (var fillBr = new SolidBrush(fCols[fi]))
-                    using (var rimPen = new Pen(isDom ? GoldCol : BorderCol, 0.9f))
-                    {
-                        g.FillRectangle(bgBr, barR);
-                        g.FillRectangle(fillBr, barR.X, barR.Y, (float)(barR.Width * Math.Clamp(val / 100.0, 0.0, 1.0)), barR.Height);
-                        g.DrawRectangle(rimPen, barR.X, barR.Y, barR.Width, barR.Height);
-                    }
-                    g.DrawString($"{val:F0}", subF, val < 15 ? new SolidBrush(BadRed) : subBr, barR.Right + 6, rowY);
-                    rowY += 19;
-                }
-            };
-            _drawerScrollBody.Controls.Add(councilCard);
-            y += 136;
-
-            using var mG = CreateGraphics();
-            using var fLog = new Font("Microsoft JhengHei UI", 8.8f);
-            foreach (var entry in State.Logs.AsEnumerable().Reverse())
-            {
-                string txt = $"[{entry.Date}] {entry.Msg}";
-                var sz = mG.MeasureString(txt, fLog, cw - 20);
-                int ch = Math.Max(42, (int)Math.Ceiling(sz.Height) + 14);
-                Color stripe = entry.Kind == "big" ? GoldCol
-                             : entry.Kind == "good" ? GoodGreen
-                             : entry.Kind == "bad" ? BadRed
-                             : BorderCol;
-                var row = new BufferedPanel
-                {
-                    Location = new Point(4, y),
-                    Size = new Size(cw, ch),
-                    BackColor = BgCard
-                };
-                string dTxt = entry.Date;
-                string mTxt = entry.Msg;
-                Color mCol = entry.Kind == "big" ? GoldCol
-                           : entry.Kind == "good" ? GoodGreen
-                           : entry.Kind == "bad" ? BadRed
-                           : TextMain;
-                row.Paint += (_, pe) =>
-                {
-                    pe.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                    pe.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-                    WarGdi.DrawPlaqueFrame(pe.Graphics, new RectangleF(0.5f, 0.5f, row.Width - 2f, row.Height - 2f), 4.5f, BgCard, BorderCol, Color.FromArgb(46, 40, 31));
-                    using var sb = new SolidBrush(stripe);
-                    pe.Graphics.FillRectangle(sb, 1.5f, 3f, 3.5f, row.Height - 6f);
-                    using var fgBr = new SolidBrush(mCol);
-                    pe.Graphics.DrawString($"[{dTxt}] {mTxt}", fLog, fgBr, new RectangleF(10, 6, row.Width - 18, row.Height - 10));
-                };
-                _drawerScrollBody.Controls.Add(row);
-                y += ch + 6;
-            }
-        }
-
-        private void DrawerChartBody_Paint(object sender, PaintEventArgs e)
-        {
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-
-            int w = _drawerChartBody.Width - 16;
-            int chH = Math.Max(155, (_drawerChartBody.Height - 230) / 2);
-
-            DrawLineChart(g, new Rectangle(8, 8, w, chH), "兩岸 GDP 規模演變（億美元）",
-                State.History.Select(h => (h.Year, h.RocGdp, h.PrcGdp)).ToList());
-
-            DrawLineChart(g, new Rectangle(8, chH + 16, w, chH), "兩岸綜合軍力指數對比",
-                State.History.Select(h => (h.Year, h.RocMil, h.PrcMil)).ToList());
-
-            var rect = new Rectangle(8, chH * 2 + 24, w, Math.Max(165, _drawerChartBody.Height - chH * 2 - 32));
-            WarGdi.DrawPlaqueFrame(g, rect, 7f, BgCard, BorderCol, Color.FromArgb(56, 48, 37));
-
-            using var hdrF = new Font("Microsoft JhengHei UI", 9.8f, FontStyle.Bold);
-            using var bodyF = new Font("Microsoft JhengHei UI", 8.8f);
-            g.DrawString("◆ 戰略實力與累計戰果", hdrF, new SolidBrush(GoldCol), rect.X + 10, rect.Y + 8);
-
-            string stats =
-                $"• 台灣 GDP：${State.Gdp:F1} 億  vs  對岸 GDP：${SimEngine.PrcGdp(State):F1} 億（共軍喪失工業 {SimEngine.PrcLostIndustry(State) * 100:F0}%）\n" +
-                $"• 國軍綜合軍力：{SimEngine.RocMilIndex(State):F1}  vs  共軍軍力：{SimEngine.PrcMilIndex(State):F1}\n" +
-                $"• 國軍科技等級：陸 {State.ArmyTech:F1} / 海 {State.NavyTech:F1} / 空 {State.AirTech:F1}\n" +
-                $"• 共軍科技等級：陸 {SimEngine.PrcTech(State, GameData.CurvePrcArmyTech):F1} / 海 {SimEngine.PrcTech(State, GameData.CurvePrcNavyTech):F1} / 空 {SimEngine.PrcTech(State, GameData.CurvePrcAirTech):F1}\n" +
-                $"• 光復省分：{SimEngine.HeldMainland(State).Count} / {GameData.MainlandIds.Length} 省  |  俄占北疆：{SimEngine.UssrNodes(State).Count} 省\n" +
-                $"• 累計勝仗：{State.BattlesWon} 場  |  我軍折損 {State.RocLoss:F1} 師 vs 敵折損 {State.EnemyLoss:F1} 師  |  評分：{SimEngine.Score(State)}";
-
-            g.DrawString(stats, bodyF, new SolidBrush(TextMain), new RectangleF(rect.X + 10, rect.Y + 32, rect.Width - 20, rect.Height - 36));
-        }
-
         private void DrawLineChart(Graphics g, Rectangle r, string title, List<(int year, double roc, double prc)> pts)
         {
             WarGdi.DrawPlaqueFrame(g, r, 6f, BgCard, BorderCol, Color.FromArgb(54, 46, 35));
@@ -4000,7 +3840,6 @@ namespace RocGame
                 var opts = new JsonSerializerOptions { WriteIndented = true };
                 File.WriteAllText(SavePath, JsonSerializer.Serialize(State, opts));
                 SimEngine.Log(State, "★ 戰局進度已儲存至 savegame.json。", "good");
-                if (_activeDrawer == "intel") RefreshDrawerContent();
             }
             catch (Exception ex)
             {
