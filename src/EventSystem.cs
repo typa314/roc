@@ -320,14 +320,15 @@ namespace RocGame
                 Choices = new List<EventChoice>
                 {
                     new() {
-                        Label = "執行「鴻運計畫」強行運補，並以響尾蛇飛彈痛擊米格機",
-                        Hint = "金門守軍堅守成功（全軍經驗提升、空軍科技 +0.3、民心 +8、國際地位 +5），消耗補給 6",
-                        Stance = "固守防線", StyleTag = "blue",
+                        Label = "美軍第七艦隊馳援護航料羅灣運補，引進美援「八吋巨砲」與響尾蛇飛彈痛擊共軍",
+                        Hint = "美軍第七艦隊主力驅逐艦編隊護航突破封鎖！金門工事加固 +1、引進美援八吋巨砲與響尾蛇飛彈（陸軍科技 +0.35、空軍科技 +0.35、民心 +10、國際地位 +8），消耗補給 4",
+                        Stance = "美軍護航馳援", StyleTag = "blue",
                         Effect = s => {
-                            s.Supply = Math.Max(0, s.Supply - 6);
-                            s.AirTech += 0.3; s.Morale += 8; s.Intl += 5;
+                            s.Supply = Math.Max(0, s.Supply - 4);
+                            s.ArmyTech += 0.35; s.AirTech += 0.35; s.Morale += 10; s.Intl += 8;
+                            SimEngine.IncreaseFortification(s, "KM");
                             foreach (var u in SimEngine.UnitsAt(s, "KM", UnitDomain.Land)) u.Exp = Math.Min(5, u.Exp + 1.5);
-                            SimEngine.Log(s, "八二三砲戰大捷！國軍成功突破封鎖，空軍創下輝煌戰果。", "good");
+                            SimEngine.Log(s, "★ 八二三砲戰大捷！美軍第七艦隊馳援突破料羅灣封鎖，美援八吋巨砲摧毀共軍廈門砲陣地！", "good");
                         }
                     },
                     new() {
@@ -387,19 +388,19 @@ namespace RocGame
             new GameEvent
             {
                 Id = "great_leap_1960", Year = 1960, Month = 6, Day = 15, Tag = "時局",
-                Title = "大躍進失敗與三年大饑荒（國光作業室成立）",
-                Desc = "中共推行「大躍進」與人民公社化運動導致嚴重饑荒，大陸經濟倒退、民怨沸騰，各地出現大批逃荒難民，共軍基層官兵亦因家鄉受災而士氣動搖。",
+                Title = "大躍進失敗與三年大饑荒・反攻大陸呼聲再起",
+                Desc = "中共推行「大躍進」與人民公社化運動導致嚴重饑荒，大陸經濟倒退、民怨沸騰，各地出現大批逃荒難民，共軍基層官兵亦因家鄉受災而士氣動搖。中樞內部要求把握戰機反攻大陸之呼聲達到高潮。",
                 Cond = s => GameData.MainlandIds.Any(id => s.Control[id] == Faction.PRC),
                 Choices = new List<EventChoice>
                 {
                     new() {
-                        Label = "成立「國光作業室」加速反攻整備，同時對大陸空投救濟糧與傳單",
-                        Hint = "中共穩定度 -15、敵區全境民心浮動 +15、兩棲登陸加成 +10%",
-                        Stance = "整備反攻", StyleTag = "gold",
+                        Label = "對大陸全面空投救濟糧與心戰傳單，動員海外僑胞援助難民",
+                        Hint = "中共穩定度 -15、敵區全境民心浮動 +15、國際地位 +5",
+                        Stance = "心戰救濟", StyleTag = "gold",
                         Effect = s => {
-                            ShockPrc(s, 15); s.PrcGdpMod = 0.84; s.LandingBonus += 0.10;
+                            ShockPrc(s, 15); s.PrcGdpMod = 0.84; s.Intl += 5;
                             foreach (var id in GameData.MainlandIds) if (s.Control[id] == Faction.PRC) s.Unrest[id] += 15;
-                            SimEngine.Log(s, "大陸深陷三年困難時期，我方成立國光作業室，積極籌劃反攻作戰！", "good");
+                            SimEngine.Log(s, "大陸深陷三年困難時期，國府發動空投救濟與心戰宣傳，重創北京威信！", "good");
                         }
                     },
                     new() {
@@ -429,6 +430,49 @@ namespace RocGame
                                 s.Garrison[id] = Math.Max(1.0, s.Garrison[id] * 0.85);
                             }
                             SimEngine.Log(s, "情報局趁饑荒啟動前線敵後工作網，大陸民間反抗暗潮洶湧！", "good");
+                        }
+                    }
+                }
+            },
+            new GameEvent
+            {
+                Id = "guoguang_1961", Year = 1961, Month = 4, Day = 1, Tag = "時局",
+                Title = "「國光作業室」於三峽秘密成立（國光計畫全面啟動）",
+                Desc = "1961 年 4 月 1 日，蔣中正總統下令於台北縣三峽成立「國光作業室」，由朱元琮中將出任主任，動員三軍兩百餘位作戰參謀，針對福建、廣東、浙江等沿海發動兩棲反攻擬定「國光計畫」26項作戰方案，反攻大陸進入最高戰備整備！",
+                Cond = s => GameData.MainlandIds.Any(id => s.Control[id] == Faction.PRC),
+                Choices = new List<EventChoice>
+                {
+                    new() {
+                        Label = "加速國光計畫全軍演習推演，提升兩棲攻堅與爭取美方窗口",
+                        Hint = "兩棲登陸加成 +12%、空軍科技 +0.2、獲得美方默許窗口 2 年",
+                        Stance = "國光推演", StyleTag = "red",
+                        Effect = s => {
+                            s.LandingBonus += 0.12; s.AirTech += 0.2; s.UsConsent = Math.Max(s.UsConsent, 2);
+                            SimEngine.Log(s, "國光作業室啟動密集兵棋推演，三軍兩棲反攻戰備全面升級！", "good");
+                        }
+                    },
+                    new() {
+                        Label = "強化步戰後勤協同與彈藥儲備，厚植登陸部隊戰備妥善率",
+                        Hint = "陸軍科技 +0.3、補給 +15、台灣本島部隊戰備 +8%",
+                        Stance = "戰力整編", StyleTag = "blue",
+                        Effect = s => {
+                            s.ArmyTech += 0.3; s.Supply += 15;
+                            foreach (var u in SimEngine.UnitsAt(s, "TW", UnitDomain.Land)) u.Str = Math.Min(100, u.Str + 8);
+                            SimEngine.Log(s, "國光計畫著重部隊實兵打擊力，地面部隊作戰力大幅提升！", "good");
+                        }
+                    },
+                    new() {
+                        Label = "配合國光作戰指導，向前線沿海實施「海威」特種突擊破襲",
+                        Hint = "中共穩定度 -8、東南敵軍動盪 +12% 並削減沿海守軍 1 師",
+                        Stance = "海威突擊", StyleTag = "gold",
+                        Effect = s => {
+                            ShockPrc(s, 8);
+                            foreach (var id in PickFromPreferredOrFront(s, new[] { "FJ", "GD", "ZJ" }, 3, Faction.PRC))
+                            {
+                                s.Unrest[id] += 12;
+                                s.Garrison[id] = Math.Max(1.0, s.Garrison[id] * 0.90);
+                            }
+                            SimEngine.Log(s, "國光作業室指揮「海威」特戰部隊突擊大陸沿海，共軍海防戒備混亂！", "good");
                         }
                     }
                 }
@@ -528,6 +572,45 @@ namespace RocGame
                             }
                             SimEngine.AddUnit(s, "mil", ctx.PickForwardRocNode(s, "GD"), 85);
                             SimEngine.Log(s, "特戰部隊配合越戰態勢滲透南疆與前線敵區，反共游擊勢力紛紛響應！", "good");
+                        }
+                    }
+                }
+            },
+            new GameEvent
+            {
+                Id = "battle_86_1965", Year = 1965, Month = 8, Day = 6, Tag = "時局",
+                Title = "八六海戰與「國光計畫」戰略轉折",
+                Desc = "1965 年 8 月 6 日，海軍巡防第二艦隊旗艦「劍門」與「章江」兩艦執行國光計畫「海威八號」特戰滲透任務，於福建東山島海域遭遇共軍魚雷快艇與護衛艇狼群伏擊，兩艦激戰沉沒、胡嘉恆少將殉職。此役震動台北中樞，大型兩棲登陸反攻風險備受考驗。",
+                Cond = s => s.Control.GetValueOrDefault("FJ") == Faction.PRC || s.Control.GetValueOrDefault("GD") == Faction.PRC,
+                Choices = new List<EventChoice>
+                {
+                    new() {
+                        Label = "汲取海戰教訓，轉向海空飛彈現代化與近海精準防衛",
+                        Hint = "海軍科技 +0.35、空軍科技 +0.35、研發點數 +5",
+                        Stance = "技術轉型", StyleTag = "blue",
+                        Effect = s => {
+                            s.NavyTech += 0.35; s.AirTech += 0.35; s.ResearchProg += 5;
+                            SimEngine.Log(s, "八六海戰後，國軍加速新式海空飛彈戰術研發與雷達換裝！", "good");
+                        }
+                    },
+                    new() {
+                        Label = "痛定思痛、三軍全力報復！以優勢空軍對敵閩南基地發動雷霆打擊",
+                        Hint = "福建共軍守軍 -2 師、民心 +5；但消耗補給 6",
+                        Stance = "海空報復", StyleTag = "red",
+                        Effect = s => {
+                            s.Supply = Math.Max(0, s.Supply - 6);
+                            if (s.Control["FJ"] == Faction.PRC) s.Garrison["FJ"] = Math.Max(1.0, s.Garrison["FJ"] - 2.0);
+                            s.Morale += 5;
+                            SimEngine.Log(s, "空軍大舉出擊報復轟炸敵軍沿海快艇基地，重創福建共軍海防！", "big");
+                        }
+                    },
+                    new() {
+                        Label = "落實「三分軍事、七分政治」，全面深耕台灣經濟與民生防護",
+                        Hint = "台灣 GDP +6%、民心 +8、國庫 +1.2 億",
+                        Stance = "經濟深耕", StyleTag = "gold",
+                        Effect = s => {
+                            s.Gdp *= 1.06; s.Morale += 8; s.Treasury += 1.2;
+                            SimEngine.Log(s, "中樞反思戰略，確立以厚植台灣實力為根基之總體國策。", "good");
                         }
                     }
                 }
@@ -660,6 +743,29 @@ namespace RocGame
                             s.Manpower += 4; s.Supply += 15; s.ResearchProg += 8;
                             SimEngine.Log(s, "面對外交劇變，統帥部轉入最高戰時動員體制，全力擴充戰備與科研！", "big");
                         }
+                    }
+                },
+                Specialize = (s, copy) =>
+                {
+                    if (s.Control.GetValueOrDefault("HE") == Faction.ROC || SimEngine.HeldMainland(s).Count >= 8)
+                    {
+                        copy.Title = "聯合國大會表決中國代表權（中華民國收復法統地位）";
+                        copy.Desc = "由於國軍已光復大陸多省（包含首都北平），聯合國大會以壓倒性票數否決阿爾巴尼亞提案，正式確認中華民國於聯合國之合法創始常任理事國席位！";
+                        copy.Choices = new List<EventChoice>
+                        {
+                            new() {
+                                Label = "確立常任理事國權利，爭取自由世界全面經援與外交復交",
+                                Hint = "國際地位 +30、美國關係 +20、民心 +10",
+                                Stance = "收復法統", StyleTag = "blue",
+                                Effect = st => { st.Intl += 30; st.UsRel += 20; st.Morale += 10; SimEngine.Log(st, "聯合國大會確認中華民國合法代表權，國際外交聲威大振！", "good"); }
+                            },
+                            new() {
+                                Label = "號召全球華人與友邦投資新中國戰後重建",
+                                Hint = "GDP +12%、國庫 +8 億、民心 +8",
+                                Stance = "戰後重建", StyleTag = "gold",
+                                Effect = st => { st.Gdp *= 1.12; st.Treasury += 8.0; st.Morale += 8; SimEngine.Log(st, "全球僑資與西方友邦踴躍投入大陸光復省分重建！", "good"); }
+                            }
+                        };
                     }
                 }
             },
@@ -1584,7 +1690,7 @@ namespace RocGame
                     s.Unrest[id] = 26;
                     s.Garrison[id] *= 0.82;
                 }
-                foreach (var t in new[] { "land_reform", "import_sub", "export_zone", "us_reorg", "armor", "airborne", "amphib_doc", "lst_fleet", "front_depot", "amphib_group", "jets", "sidewinder", "f104", "f5e", "recon_coast", "comint", "black_cat", "hkmacau_net", "psywar", "hongkong_psy", "underground" })
+                foreach (var t in new[] { "land_reform", "import_sub", "export_zone", "uranium_procure", "us_reorg", "armor", "airborne", "amphib_doc", "lst_fleet", "front_depot", "amphib_group", "jets", "sidewinder", "f104", "f5e", "recon_coast", "comint", "black_cat", "hkmacau_net", "psywar", "hongkong_psy", "underground" })
                     SimEngine.GrantTech(s, t);
                 SimEngine.AddUnit(s, "arm", "TW", 100);
                 SimEngine.AddUnit(s, "arm", "TW", 100);

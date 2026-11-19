@@ -56,12 +56,12 @@ namespace RocGame
 
             _techPauseBadgeLbl = new Label
             {
-                Text = "▶ 時間流動中 · 事件發生時自動暫停",
-                ForeColor = GoodGreen,
-                BackColor = Color.FromArgb(30, 56, 38),
+                Text = "▌▌ 時間已自動暫停 · 按 T 或 ESC 返回戰場",
+                ForeColor = Color.FromArgb(148, 212, 204),
+                BackColor = Color.FromArgb(36, 56, 52),
                 Font = new Font("Microsoft JhengHei UI", 8.4f, FontStyle.Bold),
                 Location = new Point(248, 13),
-                Size = new Size(272, 25),
+                Size = new Size(290, 25),
                 TextAlign = ContentAlignment.MiddleCenter
             };
 
@@ -322,17 +322,11 @@ namespace RocGame
                     _techPauseBadgeLbl.ForeColor = GoldCol;
                     _techPauseBadgeLbl.BackColor = Color.FromArgb(94, 68, 28);
                 }
-                else if (_userPaused)
-                {
-                    _techPauseBadgeLbl.Text = "▌▌ 已暫停（空白鍵或右上繼續）";
-                    _techPauseBadgeLbl.ForeColor = Color.FromArgb(244, 214, 146);
-                    _techPauseBadgeLbl.BackColor = Color.FromArgb(64, 52, 28);
-                }
                 else
                 {
-                    _techPauseBadgeLbl.Text = $"▶ {_simSpeed}× 時間流動中 · 事件發生時自動暫停";
-                    _techPauseBadgeLbl.ForeColor = GoodGreen;
-                    _techPauseBadgeLbl.BackColor = Color.FromArgb(30, 56, 38);
+                    _techPauseBadgeLbl.Text = "▌▌ 時間已自動暫停 · 按 T 或 ESC 返回戰場";
+                    _techPauseBadgeLbl.ForeColor = Color.FromArgb(148, 212, 204);
+                    _techPauseBadgeLbl.BackColor = Color.FromArgb(36, 56, 52);
                 }
             }
 
@@ -967,7 +961,7 @@ namespace RocGame
                 }
                 else
                 {
-                    subTxt = prog > 0.001 ? $"暫存 {prog:F1}/{t.Cost:F0}" : $"{t.Year}年 · 未解鎖";
+                    subTxt = prog > 0.001 ? $"暫存 {prog:F1}/{t.Cost:F0}" : "前置未達成";
                     subCol = Color.FromArgb(118, 110, 96);
                 }
                 using (var sBr = new SolidBrush(subCol))

@@ -474,6 +474,15 @@ Release 建置 0 警告 0 錯誤。`--test` 退出碼 0，報告為全部通過�
      - `src/Program.cs` 新增斷言驗證主介面不含「戰報日誌」與常駐「兩岸國力」入口，並確認結算畫面正常呈現國力曲線。
      - 執行 `dotnet test` / `國光：反攻大陸.exe --test`：全數測試通過（100% PASS）。
 
+## 2026-11-17 — 查看科技樹時自動暫停時間
+
+- **需求落實**：
+  - `src/MainForm.cs`：更新 `IsOverlayPausingTime => _intelPageOpen || _techPageOpen`，使開啟科技樹專頁時同步暫停即時時間流動與推進計時器（`_simTimer.Stop()`），退出科技樹頁面後自動恢復原本時間流動狀態。
+  - `src/MainForm.cs`：更新頂部 HUD 時鐘文字（顯示 `▌▌ 科技暫停`）與暫停按鈕樣式（顯示 `▌▌ 科技`），禁用在科技樹內重複觸發時間切換。
+  - `src/MainForm.Tech.cs`：狀態標籤更新為 `▌▌ 時間已自動暫停 · 按 T 或 ESC 返回戰場`。
+  - `src/Program.cs`、`DESIGN.md`：同步更新測試斷言與架構說明，驗證開啟科技樹期間時間停止且日期不前進、離開科技樹後自動恢復流動。
+  - 執行 `dotnet test` / `國光：反攻大陸.exe --test`：全數測試通過（100% PASS）。
+
 
 ## 2026-11-16 — 全數 16 種結局 1950–2025 模擬實跑驗證（test 5G）
 
@@ -494,3 +503,26 @@ Release 建置 0 警告 0 錯誤。`--test` 退出碼 0，報告為全部通過�
     - `end_full -> full`（`1961`, `26` 省）、`end_collapse -> collapse`（`2026`, `10` 省）、`end_split_ussr -> split_ussr`（`2026`, `19` 省）、`end_armistice -> armistice`（`1981`, `22` 省）、`end_nanbei -> nanbei`（`2026`, `8` 省）、`end_beachhead -> beachhead`（`2026`, `1` 省）、`end_warlordP -> warlordP`（`2026`, `0` 省）、`end_warlordR -> warlordR`（`2026`, `3` 省）、`end_junta -> junta`（`2026`, `0` 省）、`end_mutiny -> mutiny`（`2026`, `0` 省）、`end_fortress -> fortress`（`2026`, `0` 省）、`end_status -> status`（`2026`, `0` 省）、`end_pianan -> pianan`（`2026`, `0` 省）、`end_invaded -> invaded`（`2026`, `0` 省）、`end_annexed -> annexed`（`2026`, `0` 省）、`end_bankrupt -> bankrupt`（`2026`, `0` 省）；全數 `ZeroSixMonthStreaks = 0`。
   - `國光：反攻大陸.exe --test`：`TEST_EXIT=0`，`1 / 2 / 3 / 4 / 4B / 5 / 5B / 5C / 5D / 5E / 5F / 5G` 全數 `[PASS]`。
   - `國光：反攻大陸.exe --sim 5 --policy all --seed 1000`（`SIM_ALL_EXIT=0`，20 局全數 `ZeroSixMonthStreaks = 0`）：`passive`（1× `status`、4× `junta`）、`econ`（5× `armistice` 1980–1981 含 15–22 省）、`rush1950`（5× `full` 1958–1993 含 26 省）、`opportunist`（3× `full` 2006–2026 含 20–26 省、2× `warlordR` 2026 含 21 省）。
+
+## 2026-11-19 — 解決反覆開戰警告、擴充核武體系與80項科技樹、建軍與穩定度0數值校準
+
+### 核心問題定位與修復
+1. **開戰警告不再重複跳出**：
+   - 根因：MainForm.DispatchCheckedUnitsTo 針對跨海派兵或未獲美方同意之攻擊行動呼叫 SimEngine.WouldBreakTreaty，原先因每個被勾選或拖曳的師級單位獨立檢定，導致每派一師便重複彈出模態確認對話框。
+   - 修正：首次確認時寫入 s.Flags["treatyWarned"] = 1，後續出兵與調防即時略過警示對話框，不再反覆打擾玩家操作。
+2. **主動核武研發體系與戰術核打擊**：
+   - 解除原先需等待中共 1964 羅布泊核試（prcNuke）之後才能被動研發的限制；建立新竹與龍潭自主核武鏈（uranium_procure 1965 -> 
+uke_program 1966 -> 
+uke_weapon 1978 -> 	actical_nuke 1982 -> 
+uke_hbomb 1988）。
+   - 完成核武研發後自動獲得核彈頭儲備（NukeStockpile）且每年自動產能補充；於敵方大陸省分省卡新增「☣ 戰術核打擊」按鈕，實施核打擊可瓦解 75% 駐軍與 100% 要塞防線。
+3. **科技樹擴充至 80+ 項**：
+   - 全面擴充五大科技分支（科技、軍工、情報、敵後、後勤）至 80 項完整節點，嚴格遵循不含「史實」或「架空」禁止字樣之規範。
+4. **解決建軍無兵源與國庫充盈招募問題**：
+   - 擴充建軍按鈕邏輯：抽屜按鈕恆常保持顯示並標記狀態；若兵源（Manpower）不足但國庫充盈，允許以津貼補貼方式直接招募建軍（每 1.0 缺額兵源折算 .10B 國庫津貼），並於抽屜及省卡提供直接召募按鈕。
+5. **中共政權穩定度 0 戰力瓦解校準**：
+   - 校準 PrcStabFactor：在穩定度歸零（<= 0）時共軍戰力倍率壓低至 0.10，且停止月度兵力自然補充；在戰鬥中擊潰低穩定共軍時新增戰俘起義投誠叛變為國軍部隊之機制，徹底解決穩定度歸零仍打不下來的問題。
+6. **模擬器 16 結局全數覆蓋與 100% 自動化測試**：
+   - 校準 BatchSim.cs 策略評分與 SimEngine.CheckEnd 對蘇俄割據（split_ussr）與南北分治（
+anbei）之結算條件，確保 1950–2025 模擬器 16 種結局全數可在指定種子範圍內穩定跑出。
+   - dotnet run -- --test 自動化自測（含測試 1 至 5G 及無 HTML 輸出）100% 通過。

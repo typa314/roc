@@ -104,7 +104,7 @@ namespace RocGame
         private DarkScrollContainer _nodeChipsWrap;
         private FlowLayoutPanel _nodeChipsPanel;
         private Label _nodeOrderHintLbl;
-        private Button _btnLocalRecruit, _btnFortifyProvince, _btnLocalBuildInf, _btnNodePriority;
+        private Button _btnLocalRecruit, _btnLocalBuildInf, _btnNodePriority, _btnAirStrike, _btnNukeStrike;
         private readonly List<(RectangleF rect, List<int> unitIds, bool isPrep, string tip)> _orderBadgeHits = new();
 
         private WarRoomPanel _zoneCard;
@@ -251,7 +251,7 @@ namespace RocGame
         }
         public int SimSpeed => _simSpeed;
         public bool IsEasyMode => State?.EasyMode ?? _selectedEasyMode;
-        private bool IsOverlayPausingTime => _intelPageOpen;
+        private bool IsOverlayPausingTime => _intelPageOpen || _techPageOpen;
         private bool IsClockRunning => !_showTitle && !_userPaused && !IsOverlayPausingTime && State != null && State.Over == null && State.PendingEvents.Count == 0;
 
         public List<string> GetOpenEventCardBadgesForTest()
@@ -344,6 +344,11 @@ namespace RocGame
             {
                 _btnPause.Text = "▌▌ 事件";
                 SetWarButtonStyle(_btnPause, Color.FromArgb(94, 68, 28), GoldCol, GoldCol);
+            }
+            else if (_techPageOpen)
+            {
+                _btnPause.Text = "▌▌ 科技";
+                SetWarButtonStyle(_btnPause, Color.FromArgb(46, 72, 92), GoldCol, GoldCol);
             }
             else if (_intelPageOpen)
             {
@@ -928,44 +933,77 @@ namespace RocGame
                 TextAlign = ContentAlignment.MiddleLeft
             };
 
-            _btnLocalRecruit = CreateWarButton("\u6536\u7de8\u6c11\u5175", BgCard, TextMain, 134, 27);
+            _btnLocalRecruit = CreateWarButton("接納民兵·併入國軍", BgCard, TextMain, 205, 28);
             _btnLocalRecruit.Font = new Font("Microsoft JhengHei UI", 7.8f, FontStyle.Bold);
             _btnLocalRecruit.Location = new Point(14, 183);
-            _btnLocalRecruit.Click += (_, _) => ExecuteProvinceGarrisonAction(fortify: false);
+            _btnLocalRecruit.Click += (_, _) => ExecuteProvinceGarrisonAction();
 
-            _btnFortifyProvince = CreateWarButton("\u9663\u5730\u52a0\u56fa", BgCard, GoldCol, 134, 27);
-            _btnFortifyProvince.Font = new Font("Microsoft JhengHei UI", 7.8f, FontStyle.Bold);
-            _btnFortifyProvince.Location = new Point(156, 183);
-            _btnFortifyProvince.Click += (_, _) => ExecuteProvinceGarrisonAction(fortify: true);
-
-            _btnLocalBuildInf = CreateWarButton("\u7de8\u6210\u6b65\u5175", Color.FromArgb(46, 78, 56), TextMain, 134, 27, GoodGreen);
+            _btnLocalBuildInf = CreateWarButton("基地編成步兵", Color.FromArgb(46, 78, 56), TextMain, 205, 28, GoodGreen);
             _btnLocalBuildInf.Font = new Font("Microsoft JhengHei UI", 7.8f, FontStyle.Bold);
-            _btnLocalBuildInf.Location = new Point(298, 183);
+            _btnLocalBuildInf.Location = new Point(227, 183);
             _btnLocalBuildInf.Click += (_, _) =>
             {
                 if (SelectedNode == null || State.PendingEvents.Count > 0 || State.Over != null) return;
                 var res = SimEngine.BuildUnit(State, "inf", SelectedNode);
                 if (!res.ok)
-                    MessageBox.Show(res.reason, "\u5c31\u5730\u751f\u5175", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(res.reason, "就地生兵", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 RefreshAllUi();
+            };
+
+            _btnAirStrike = CreateWarButton("✈ 發動戰術空襲", Color.FromArgb(42, 68, 88), GoldCol, 418, 28, GoldCol);
+            _btnAirStrike.Font = new Font("Microsoft JhengHei UI", 8.2f, FontStyle.Bold);
+            _btnAirStrike.Location = new Point(14, 183);
+            _btnAirStrike.Visible = false;
+            _btnAirStrike.Click += (_, _) =>
+            {
+                if (SelectedNode == null || State.PendingEvents.Count > 0 || State.Over != null) return;
+                var res = SimEngine.AirStrikeProvince(State, SelectedNode);
+                if (!res.ok)
+                    MessageBox.Show(res.reason, "戰術空襲", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                RefreshAllUi();
+                _mapPanel.Invalidate();
+            };
+
+            _btnNukeStrike = CreateWarButton("☢ 戰術核打擊", Color.FromArgb(78, 28, 28), GoldCol, 205, 28, BadRed);
+            _btnNukeStrike.Font = new Font("Microsoft JhengHei UI", 8.0f, FontStyle.Bold);
+            _btnNukeStrike.Location = new Point(227, 183);
+            _btnNukeStrike.Visible = false;
+            _btnNukeStrike.Click += (_, _) =>
+            {
+                if (SelectedNode == null || State.PendingEvents.Count > 0 || State.Over != null) return;
+                if (!GameData.Nodes.TryGetValue(SelectedNode, out var pNode)) return;
+                if (State.NukeStockpile <= 0)
+                {
+                    MessageBox.Show("戰術核彈頭庫存不足（0 枚）。請等待核研所年度核組件產出，或研發相關核武科技！", "戰術核打擊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                var dr = MessageBox.Show(
+                    $"確定對【{pNode.Name}】發射天馬戰術核飛彈？\n\n打擊效果：\n• 消滅該省 75% 守軍主力\n• 徹底摧毀防禦工事\n• 中共政權穩定度重挫 -18%\n• 消耗 1 枚戰術核彈頭（剩餘 {State.NukeStockpile - 1} 枚）",
+                    "天馬戰術核打擊確認",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+                if (dr == DialogResult.Yes)
+                {
+                    SimEngine.NukeStrike(State, SelectedNode);
+                    RefreshAllUi();
+                    _mapPanel.Invalidate();
+                }
             };
 
             _nodeCard.Controls.AddRange(new Control[]
             {
                 _nodeTitleLbl, _btnNodePriority, btnCloseNode, _nodeStatsLbl,
                 btn1, btn3, btnHalf, btnAll, btnNone, _nodeSelCountLbl,
-                _nodeChipsWrap, _btnLocalRecruit, _btnFortifyProvince, _btnLocalBuildInf, _nodeOrderHintLbl
+                _nodeChipsWrap, _btnLocalRecruit, _btnLocalBuildInf, _btnAirStrike, _btnNukeStrike, _nodeOrderHintLbl
             });
         }
 
-        private void ExecuteProvinceGarrisonAction(bool fortify)
+        private void ExecuteProvinceGarrisonAction()
         {
             if (SelectedNode == null || State.PendingEvents.Count > 0 || State.Over != null) return;
-            var result = fortify
-                ? SimEngine.FortifyProvince(State, SelectedNode)
-                : SimEngine.RecruitLocalMilitia(State, SelectedNode);
+            var result = SimEngine.RecruitLocalMilitia(State, SelectedNode);
             if (!result.ok)
-                MessageBox.Show(result.reason, "\u7701\u5206\u9632\u52d9", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(result.reason, "接納民兵", MessageBoxButtons.OK, MessageBoxIcon.Information);
             RefreshAllUi();
         }
 
@@ -1532,6 +1570,7 @@ namespace RocGame
             g.DrawString(IsEasyMode ? "· 簡易" : "· 一般", pillLblF, IsEasyMode ? goldBr : subBr, 14 + titleSz.Width + 1, 10);
             string clockStatus = State.PendingEvents.Count > 0 ? "▌▌ 事件暫停"
                                : State.Over != null ? "■ 歷史終局"
+                               : _techPageOpen ? "▌▌ 科技暫停"
                                : _intelPageOpen ? "▌▌ 軍情暫停"
                                : _userPaused ? "▌▌ 已暫停"
                                : $"▶ {_simSpeed}×";
@@ -2425,8 +2464,9 @@ namespace RocGame
                 int fleets = SimEngine.UnitsAt(State, z.Id, UnitDomain.Sea).Count;
                 int wings = SimEngine.UnitsAt(State, z.Id, UnitDomain.Air).Count;
 
+                string usBadge = (State.UsProtect && (z.Id == "Z2" || (z.Id == "Z3" && State.UsRel >= 55))) ? " [🇺🇸第七艦隊]" : "";
                 using var hdrBr = new SolidBrush(sel ? GoldCol : Color.FromArgb(224, 216, 194));
-                g.DrawString($"⚓ {z.Name} (艦{fleets}/空{wings})", titleF, hdrBr, rect.X + 6 * uiScale, rect.Y + 3 * uiScale);
+                g.DrawString($"⚓ {z.Name}{usBadge} (艦{fleets}/空{wings})", titleF, hdrBr, rect.X + 6 * uiScale, rect.Y + 3 * uiScale);
 
                 double prcSea = SimEngine.PrcSea(State, z.Id);
                 double prcAir = SimEngine.PrcAir(State, z.Id);
@@ -2720,9 +2760,12 @@ namespace RocGame
                     g.DrawEllipse(dotPen, pt.X - r, pt.Y - r, r * 2, r * 2);
                 }
 
+                double nodeAir = SimEngine.NodeAirSup(State, n.Id);
+                bool airRecon = nodeAir >= 0.55 && State.Units.Any(u => u.Type == "air" && u.Str >= 25.0);
                 string priMark = State.PriorityTargets.Contains(n.Id) ? "[重點]" : "";
                 string prefix = n.Capital ? "★" : (ctrl == Faction.USSR ? "[俄]" : (n.Port ? "⚓" : ""));
-                string label = $"{priMark}{prefix}{n.Name}";
+                string airMark = airRecon ? "✈" : (!SimEngine.HasIntel(State, n.Id) ? "☁" : "");
+                string label = $"{priMark}{prefix}{n.Name}{airMark}";
                 var lblSz = g.MeasureString(label, nameF);
                 float lx = pt.X - lblSz.Width / 2;
                 float ly = pt.Y - r - lblSz.Height - 1.5f * uiScale;
@@ -2772,8 +2815,9 @@ namespace RocGame
                 {
                     DrawUnitCounter(g, new PointF(pt.X - 20 * uiScale, cy), $"國 {rocStr:F1}", RocBlue, cntF, uiScale);
                     string ePrefix = ctrl == Faction.USSR ? "俄" : "共";
-                    Color eCol = ctrl == Faction.USSR ? UssrPurple : PrcRed;
-                    DrawUnitCounter(g, new PointF(pt.X + 20 * uiScale, cy), $"{ePrefix} {(exact ? $"{estG:F1}" : $"~{estG:F0}?")}", eCol, cntF, uiScale);
+                    Color eCol = ctrl == Faction.USSR ? UssrPurple : (exact ? PrcRed : Color.FromArgb(148, 64, 58));
+                    string eTxt = exact ? $"{ePrefix} {estG:F1}" : $"{ePrefix} ~{estG:F0}?[霧]";
+                    DrawUnitCounter(g, new PointF(pt.X + 20 * uiScale, cy), eTxt, eCol, cntF, uiScale);
                 }
                 else if (showRoc)
                 {
@@ -2782,8 +2826,9 @@ namespace RocGame
                 else if (showEnemy)
                 {
                     string ePrefix = ctrl == Faction.USSR ? "俄" : "共";
-                    Color eCol = ctrl == Faction.USSR ? UssrPurple : PrcRed;
-                    DrawUnitCounter(g, new PointF(pt.X, cy), $"{ePrefix} {(exact ? $"{estG:F1}" : $"~{estG:F0}?")}", eCol, cntF, uiScale);
+                    Color eCol = ctrl == Faction.USSR ? UssrPurple : (exact ? PrcRed : Color.FromArgb(148, 64, 58));
+                    string eTxt = exact ? $"{ePrefix} {estG:F1}" : $"{ePrefix} ~{estG:F0}?[霧]";
+                    DrawUnitCounter(g, new PointF(pt.X, cy), eTxt, eCol, cntF, uiScale);
                 }
             }
         }
@@ -2880,8 +2925,10 @@ namespace RocGame
                     ? $"  |  地下網：Lv.{State.UndergroundNet.GetValueOrDefault(n.Id, 0)}"
                     : "  |  地下網：Lv.?")
                 : "";
+            double nAirSup = SimEngine.NodeAirSup(State, n.Id);
+            string airSupTag = nAirSup >= 0.55 ? "(✔空中偵察)" : "(☁迷霧)";
             string text = $"【{n.Name}（{n.City}）】 — {ctrlStr}\n" +
-                          $"國軍：{rocS:F1} 師  |  敵軍：{(exact ? $"{estG:F1} 師" : $"~{estG:F1} 師")}  |  工業：{n.Industry}  |  制空：{SimEngine.NodeAirSup(State, n.Id) * 100:F0}%{ugStr}" +
+                          $"國軍：{rocS:F1} 師  |  敵軍：{(exact ? $"{estG:F1} 師" : $"~{estG:F1} 師[霧]")}  |  工業：{n.Industry}  |  制空：{nAirSup * 100:F0}% {airSupTag}{ugStr}" +
                           (string.IsNullOrEmpty(moveHint) ? "" : "\n" + moveHint);
 
             using var f = new Font("Microsoft JhengHei UI", 8.8f);
@@ -3208,7 +3255,7 @@ namespace RocGame
         private void DispatchCheckedUnitsTo(string dest)
         {
             if (_checkedUnitIds.Count == 0) return;
-            if (SimEngine.WouldBreakTreaty(State, dest))
+            if (SimEngine.WouldBreakTreaty(State, dest) && !State.HasFlag("treatyWarned"))
             {
                 var dr = MessageBox.Show(
                     "進攻大陸將違反《中美共同防禦條約》換文規定（未獲美方事前默許）！\n強行出兵將導致美方中止援助、撤回協防且對美關係 -30。\n\n是否仍要下令強行反攻？",
@@ -3216,6 +3263,7 @@ namespace RocGame
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning);
                 if (dr != DialogResult.Yes) return;
+                State.Flags["treatyWarned"] = 1;
             }
 
             var result = SimEngine.IsHostileTarget(State, dest)
@@ -3260,7 +3308,8 @@ namespace RocGame
                 bool canFOut = SimEngine.FindNavalAirCandidate(State, z.Id, "fleet", false) != null;
                 bool canAOut = SimEngine.FindNavalAirCandidate(State, z.Id, "air", false) != null;
 
-                _zoneTitleLbl.Text = $"⚓ {z.Name}戰區・海空直調";
+                string usZoneNote = (State.UsProtect && (z.Id == "Z2" || z.Id == "Z3" || State.UsConsent > 0)) ? " [🇺🇸 美軍第七艦隊巡弋]" : "";
+                _zoneTitleLbl.Text = $"⚓ {z.Name}戰區・海空直調{usZoneNote}";
                 _zoneStatsLbl.Text = $"制海 {SimEngine.SeaSup(State, z.Id) * 100:F0}% (國{rs:F0}/共{ps:F0})  ·  制空 {SimEngine.AirSup(State, z.Id) * 100:F0}% (國{ra:F0}/共{pa:F0})\n點右側 [＋][－] 微調，或按地圖右下「⚓ 一鍵海空佈防」自動平衡";
                 _zoneFleetLbl.Text = $"⚓ 駐防艦隊：{fIn} 艘 (可用預備 {fReady})";
                 _zoneAirLbl.Text = $"▲ 航空聯隊：{aIn} 隊 (可用預備 {aReady})";
@@ -3288,35 +3337,136 @@ namespace RocGame
                 int readyCount = landUnits.Count(u => !u.Moved);
                 int orderedCount = landUnits.Count(u => State.Orders.Any(o => o.UnitId == u.Id));
                 int fortLevel = SimEngine.FortificationLevel(State, n.Id);
-                int localMilitia = landUnits.Count(u => u.Type == "mil");
+                string fortStatus = fortLevel >= 3 ? "3/3(堅固)" : $"{fortLevel}/3(中樞自動加固中)";
+
                 bool canWorkLocally = n.Kind == NodeKind.Mainland && ctrl == Faction.ROC;
                 double recruitCost = 0.08 * SimEngine.PriceIndex(State);
-                double fortifyCost = 0.12 * (fortLevel + 1) * SimEngine.PriceIndex(State);
 
-                _nodeTitleLbl.Text = $"■ {n.Name}（{n.City}）— {ctrlName}";
+                _nodeTitleLbl.Text = $"◆ {n.Name}（{n.City}）· {ctrlName}";
                 bool isPriority = State.PriorityTargets.Contains(n.Id);
-                _btnNodePriority.Text = isPriority ? "★ 重點" : "☆ 重點";
+                _btnNodePriority.Text = isPriority ? "★ 標靶" : "☆ 標靶";
                 SetWarButtonStyle(_btnNodePriority, isPriority ? Color.FromArgb(72, 58, 22) : BgCard, isPriority ? GoldCol : TextSub, isPriority ? GoldCol : BorderCol);
 
                 int incomingCount = State.Orders.Count(o => o.To == n.Id);
-                string incomingTxt = incomingCount > 0 ? $" · 在途+{incomingCount}" : "";
+                string incomingTxt = incomingCount > 0 ? $" · 在途{incomingCount}" : "";
+                double cAirSup = SimEngine.NodeAirSup(State, n.Id);
+                bool hasAirIntel = cAirSup >= 0.55 && State.Units.Any(u => u.Type == "air" && u.Str >= 25.0);
+                string cAirTag = hasAirIntel ? "[空優透視]" : "";
                 string islandWarn = n.Id == "HI" && ctrl == Faction.ROC
-                    ? (State.HasFlag("hiPortBlocked") ? " · ⚠海口封鎖(砲火逆登陸)" : (State.HasFlag("hiQiongya") ? " · ⚠瓊崖內應" : ""))
+                    ? (State.HasFlag("hiPortBlocked") ? " · 瓊海封鎖·需搶灘登島" : (State.HasFlag("hiQiongya") ? " · 瓊崖內患" : ""))
                     : "";
+
                 _nodeStatsLbl.Text =
                     $"部署 {rocStr:F1} 師（{landUnits.Count} 支）· 待命 {readyCount} · 已派令 {orderedCount}{incomingTxt}\n" +
-                    $"敵軍 {(exact ? $"{estG:F1} 師" : $"~{estG:F1} 師")}  |  工業 {n.Industry}  |  {(n.Port ? "港口⚓" : "內陸")}  |  制空 {SimEngine.NodeAirSup(State, n.Id) * 100:F0}%  |  工事 {fortLevel}/3{islandWarn}";
-                _btnLocalRecruit.Text = $"收編民兵 {localMilitia}/3";
-                _btnLocalRecruit.Enabled = canWorkLocally && localMilitia < 3 && State.Manpower >= 0.5 && State.Treasury >= recruitCost;
-                _btnFortifyProvince.Text = $"陣地加固 {fortLevel}/3";
-                _btnFortifyProvince.Enabled = canWorkLocally && fortLevel < 3 && State.Treasury >= fortifyCost;
-                bool showLocalBuild = n.Id == "TW" || (n.Kind == NodeKind.Mainland && n.Port);
-                _btnLocalBuildInf.Visible = showLocalBuild;
-                if (showLocalBuild)
+                    $"敵軍 {(exact ? $"{estG:F1} 師" : $"~{estG:F1} 師[霧]")}  |  工業 {n.Industry}  |  {(n.Port ? "港口⚓" : "內陸")}  |  制空 {cAirSup * 100:F0}% {cAirTag}  |  陣地工事 {fortStatus}{islandWarn}";
+                bool isEnemy = ctrl != Faction.ROC;
+                if (isEnemy)
                 {
-                    var canInf = SimEngine.CanBuild(State, "inf", n.Id);
-                    _btnLocalBuildInf.Text = $"編成步兵 ${SimEngine.UnitCost(State, "inf"):F2}億";
-                    _btnLocalBuildInf.Enabled = canInf.ok;
+                    _btnLocalRecruit.Visible = false;
+                    _btnLocalBuildInf.Visible = false;
+                    _btnAirStrike.Visible = true;
+
+                    bool hasNukeTech = State.Techs.Contains("nuke_weapon") || State.Techs.Contains("tactical_nuke") || State.NukeStockpile > 0;
+                    if (hasNukeTech)
+                    {
+                        _btnAirStrike.Location = new Point(14, 183);
+                        _btnAirStrike.Size = new Size(205, 28);
+                        _btnNukeStrike.Visible = true;
+                        _btnNukeStrike.Location = new Point(227, 183);
+                        _btnNukeStrike.Size = new Size(205, 28);
+                        if (State.NukeStockpile > 0)
+                        {
+                            _btnNukeStrike.Text = $"☢ 戰術核打擊 ({State.NukeStockpile}枚)";
+                            _btnNukeStrike.Enabled = true;
+                            SetWarButtonStyle(_btnNukeStrike, Color.FromArgb(78, 28, 28), GoldCol, BadRed);
+                        }
+                        else
+                        {
+                            _btnNukeStrike.Text = "☢ 戰術核打擊 (0枚)";
+                            _btnNukeStrike.Enabled = false;
+                            SetWarButtonStyle(_btnNukeStrike, BgCard, TextSub, BorderCol);
+                        }
+                    }
+                    else
+                    {
+                        _btnNukeStrike.Visible = false;
+                        _btnAirStrike.Location = new Point(14, 183);
+                        _btnAirStrike.Size = new Size(418, 28);
+                    }
+
+                    var canStrike = SimEngine.CanAirStrike(State, n.Id);
+                    int cd = State.AirStrikeCooldowns.GetValueOrDefault(n.Id, 0);
+                    double cost = Math.Round(0.06 * SimEngine.PriceIndex(State), 2);
+                    if (cd > 0)
+                    {
+                        _btnAirStrike.Text = $"✈ 空襲冷卻({cd}天)";
+                        _btnAirStrike.Enabled = false;
+                        SetWarButtonStyle(_btnAirStrike, BgCard, TextSub, BorderCol);
+                    }
+                    else if (!canStrike.ok)
+                    {
+                        _btnAirStrike.Text = hasNukeTech ? $"✈ 空襲（{canStrike.reason}）" : $"✈ 戰術空襲（{canStrike.reason}）";
+                        _btnAirStrike.Enabled = false;
+                        SetWarButtonStyle(_btnAirStrike, BgCard, TextSub, BorderCol);
+                    }
+                    else
+                    {
+                        _btnAirStrike.Text = hasNukeTech ? $"✈ 戰術空襲 (${cost:F2}億)" : $"✈ 發動戰術空襲（花費 ${cost:F2} 億 · 削弱守軍）";
+                        _btnAirStrike.Enabled = true;
+                        SetWarButtonStyle(_btnAirStrike, Color.FromArgb(42, 68, 92), GoldCol, GoldCol);
+                    }
+                }
+                else
+                {
+                    _btnNukeStrike.Visible = false;
+                    _btnAirStrike.Visible = false;
+                    _btnLocalRecruit.Visible = true;
+                    int recruited = State.MilitiaRecruited.GetValueOrDefault(n.Id, 0);
+                    int maxMil = SimEngine.MaxMilitiaForProvince(State, n.Id);
+                    string autoRecTxt = State.AutoRecruitMilitia ? " [自動]" : "";
+                    _btnLocalRecruit.Text = $"接納民兵·併入國軍 {recruited}/{maxMil}{autoRecTxt}";
+                    _btnLocalRecruit.Enabled = canWorkLocally && recruited < maxMil && State.Manpower >= 0.5 && State.Treasury >= recruitCost;
+
+                    bool showLocalBuild = SimEngine.IsBuildBase(State, n.Id);
+                    _btnLocalBuildInf.Visible = showLocalBuild;
+                    if (showLocalBuild)
+                    {
+                        _btnLocalRecruit.Location = new Point(14, 183);
+                        _btnLocalRecruit.Size = new Size(205, 28);
+                        _btnLocalBuildInf.Location = new Point(227, 183);
+                        _btnLocalBuildInf.Size = new Size(205, 28);
+
+                        var canInf = SimEngine.CanBuild(State, "inf", n.Id);
+                        string autoInfTxt = State.AutoBuildInfantry ? " [自動]" : "";
+                        double infCost = SimEngine.UnitCost(State, "inf");
+                        double px = SimEngine.PriceIndex(State);
+                        double bounty = State.Manpower < 1.0 ? 0.10 * px * (1.0 - Math.Max(0, State.Manpower)) : 0.0;
+                        if (canInf.ok)
+                        {
+                            if (bounty > 0.01)
+                            {
+                                _btnLocalBuildInf.Text = $"撥款編成步兵 ${(infCost + bounty):F2}億{autoInfTxt}";
+                                SetWarButtonStyle(_btnLocalBuildInf, Color.FromArgb(62, 54, 24), GoldCol, GoldCol);
+                            }
+                            else
+                            {
+                                _btnLocalBuildInf.Text = $"基地編成步兵 ${infCost:F2}億{autoInfTxt}";
+                                SetWarButtonStyle(_btnLocalBuildInf, Color.FromArgb(46, 78, 56), TextMain, GoodGreen);
+                            }
+                            _btnLocalBuildInf.Enabled = true;
+                        }
+                        else
+                        {
+                            _btnLocalBuildInf.Text = $"編成步兵（{canInf.reason}）";
+                            SetWarButtonStyle(_btnLocalBuildInf, BgCard, TextSub, BorderCol);
+                            _btnLocalBuildInf.Enabled = false;
+                        }
+                    }
+                    else
+                    {
+                        _btnLocalRecruit.Location = new Point(14, 183);
+                        _btnLocalRecruit.Size = new Size(418, 28);
+                    }
                 }
 
                 var availUnits = landUnits.Where(u => !u.Moved).ToList();
@@ -3558,6 +3708,82 @@ namespace RocGame
             }
             y += 38;
 
+            var lblAuto = new Label { Text = "◆ 戰地後勤與動員自動化：", ForeColor = GoldCol, Location = new Point(4, y), AutoSize = true, Font = new Font("Microsoft JhengHei UI", 9.4f, FontStyle.Bold) };
+            _drawerScrollBody.Controls.Add(lblAuto);
+            y += 24;
+
+            int aw = (cw - 8) / 3;
+            var btnAutoFort = CreateWarButton(State.AutoFortify ? "🛡 防線加固 [開]" : "🛡 防線加固 [關]", State.AutoFortify ? Color.FromArgb(46, 78, 56) : BgCard, TextMain, aw - 4, 28, State.AutoFortify ? GoodGreen : BorderCol);
+            btnAutoFort.Font = new Font("Microsoft JhengHei UI", 8.0f, FontStyle.Bold);
+            btnAutoFort.Location = new Point(4, y);
+            btnAutoFort.Click += (_, _) => { State.AutoFortify = !State.AutoFortify; RefreshDrawerContent(); };
+            _drawerScrollBody.Controls.Add(btnAutoFort);
+
+            var btnAutoMil = CreateWarButton(State.AutoRecruitMilitia ? "👥 收編民兵 [開]" : "👥 收編民兵 [關]", State.AutoRecruitMilitia ? Color.FromArgb(46, 78, 56) : BgCard, TextMain, aw - 4, 28, State.AutoRecruitMilitia ? GoodGreen : BorderCol);
+            btnAutoMil.Font = new Font("Microsoft JhengHei UI", 8.0f, FontStyle.Bold);
+            btnAutoMil.Location = new Point(4 + aw, y);
+            btnAutoMil.Click += (_, _) => { State.AutoRecruitMilitia = !State.AutoRecruitMilitia; RefreshDrawerContent(); };
+            _drawerScrollBody.Controls.Add(btnAutoMil);
+
+            var btnAutoInf = CreateWarButton(State.AutoBuildInfantry ? "⚔ 編成步兵 [開]" : "⚔ 編成步兵 [關]", State.AutoBuildInfantry ? Color.FromArgb(46, 78, 56) : BgCard, TextMain, aw - 4, 28, State.AutoBuildInfantry ? GoodGreen : BorderCol);
+            btnAutoInf.Font = new Font("Microsoft JhengHei UI", 8.0f, FontStyle.Bold);
+            btnAutoInf.Location = new Point(4 + aw * 2, y);
+            btnAutoInf.Click += (_, _) => { State.AutoBuildInfantry = !State.AutoBuildInfantry; RefreshDrawerContent(); };
+            _drawerScrollBody.Controls.Add(btnAutoInf);
+            y += 32;
+
+            var autoDesc = new Label
+            {
+                Text = "開啟後中樞自動撥款：光復省分陣地自動加固升至3級、依民心接納義勇併入國軍；兵源充裕時於基地整編步兵。",
+                ForeColor = TextSub,
+                Font = new Font("Microsoft JhengHei UI", 7.8f),
+                Location = new Point(4, y),
+                Size = new Size(cw, 18),
+                AutoEllipsis = true
+            };
+            _drawerScrollBody.Controls.Add(autoDesc);
+            y += 24;
+
+            // 國防兵源與招募專區（解決國庫充盈卻兵源短缺無法徵兵問題）
+            var lblMan = new Label
+            {
+                Text = $"◆ 國防兵源整備（可用兵源：{State.Manpower:F1} 師 · 國庫充盈時可撥款立即增募）：",
+                ForeColor = GoldCol,
+                Font = new Font("Microsoft JhengHei UI", 9.2f, FontStyle.Bold),
+                Location = new Point(4, y),
+                AutoSize = true
+            };
+            _drawerScrollBody.Controls.Add(lblMan);
+            y += 24;
+
+            int mw = (cw - 8) / 2;
+            double recruitCost = Math.Round(0.20 * SimEngine.PriceIndex(State), 2);
+            var btnRecruitMan = CreateWarButton($"💰 撥款招募兵源 +3.0 (${recruitCost:F2}億)", State.Treasury >= recruitCost ? Color.FromArgb(52, 94, 62) : BgCard, TextMain, mw - 4, 30, State.Treasury >= recruitCost ? GoodGreen : BorderCol);
+            btnRecruitMan.Font = new Font("Microsoft JhengHei UI", 8.2f, FontStyle.Bold);
+            btnRecruitMan.Location = new Point(4, y);
+            btnRecruitMan.Enabled = State.Treasury >= recruitCost;
+            btnRecruitMan.Click += (_, _) =>
+            {
+                var res = SimEngine.RecruitManpowerWithTreasury(State);
+                if (!res.ok) MessageBox.Show(res.reason, "專案募兵", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                RefreshAllUi();
+            };
+            _drawerScrollBody.Controls.Add(btnRecruitMan);
+
+            var btnConscript = CreateWarButton("📢 動員召集令 +4.0 (民心-2)", State.Morale >= 15 ? Color.FromArgb(62, 54, 24) : BgCard, TextMain, mw - 4, 30, State.Morale >= 15 ? GoldCol : BorderCol);
+            btnConscript.Font = new Font("Microsoft JhengHei UI", 8.2f, FontStyle.Bold);
+            btnConscript.Location = new Point(4 + mw, y);
+            btnConscript.Enabled = State.Morale >= 15;
+            btnConscript.Click += (_, _) =>
+            {
+                State.Manpower += 4.0;
+                State.Morale = Math.Max(5.0, State.Morale - 2.0);
+                SimEngine.Log(State, "★ 國防部發布年度後備役動員召集令，迅速充實常備兵源 +4.0 師（民心 -2）！", "good");
+                RefreshAllUi();
+            };
+            _drawerScrollBody.Controls.Add(btnConscript);
+            y += 36;
+
             var buildBases = SimEngine.BuildBases(State);
             if (!buildBases.Contains(_buildLoc))
                 _buildLoc = buildBases.FirstOrDefault() ?? "TW";
@@ -3692,9 +3918,30 @@ namespace RocGame
                     AutoEllipsis = true
                 });
 
-                var btn = CreateWarButton(can.ok ? "編成" : can.reason, can.ok ? Color.FromArgb(52, 94, 62) : BgPanel, can.ok ? TextMain : TextSub, 102, 32, can.ok ? GoodGreen : BorderCol);
-                btn.Font = new Font("Microsoft JhengHei UI", 8.2f, FontStyle.Bold);
-                btn.Location = new Point(cw - 110, 6);
+                double baseCost = SimEngine.UnitCost(State, ut.Id);
+                double px = SimEngine.PriceIndex(State);
+                double extraBounty = State.Manpower < ut.Man ? 0.10 * px * (ut.Man - Math.Max(0, State.Manpower)) : 0.0;
+                double totalCost = baseCost + extraBounty;
+                bool canAffordNormal = can.ok && extraBounty <= 0.01;
+                bool canAffordBounty = can.ok && extraBounty > 0.01;
+
+                string btnText = canAffordNormal
+                    ? $"編成 (${baseCost:F2}億)"
+                    : canAffordBounty
+                        ? $"撥款募兵 (${totalCost:F2}億)"
+                        : can.reason;
+
+                var btnColor = canAffordNormal ? Color.FromArgb(52, 94, 62)
+                             : canAffordBounty ? Color.FromArgb(62, 54, 24)
+                             : BgPanel;
+                var btnBorder = canAffordNormal ? GoodGreen
+                              : canAffordBounty ? GoldCol
+                              : BorderCol;
+                var btnTextCol = can.ok ? (canAffordBounty ? GoldCol : TextMain) : TextSub;
+
+                var btn = CreateWarButton(btnText, btnColor, btnTextCol, 126, 32, btnBorder);
+                btn.Font = new Font("Microsoft JhengHei UI", 7.8f, FontStyle.Bold);
+                btn.Location = new Point(cw - 134, 6);
                 btn.Enabled = can.ok;
                 string tid = ut.Id;
                 string tLoc = spawnTarget;
@@ -3704,9 +3951,9 @@ namespace RocGame
                 if (linkedTech != null)
                 {
                     string focusTechId = linkedTech.Id;
-                    var techBtn = CreateWarButton("查看科技 →", BgPanel, GoldCol, 102, 25, BorderCol);
+                    var techBtn = CreateWarButton("查看科技 →", BgPanel, GoldCol, 126, 25, BorderCol);
                     techBtn.Font = new Font("Microsoft JhengHei UI", 7.8f, FontStyle.Bold);
-                    techBtn.Location = new Point(cw - 110, 46);
+                    techBtn.Location = new Point(cw - 134, 46);
                     techBtn.Click += (_, _) => OpenTechPageAt(focusTechId);
                     card.Controls.Add(techBtn);
                 }

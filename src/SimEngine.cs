@@ -217,6 +217,7 @@ namespace RocGame
         public bool Treaty { get; set; } = false;
         public bool TreatyRestrict { get; set; } = false;
         public int UsConsent { get; set; } = 0;
+        public int NukeStockpile { get; set; } = 0;
 
         public Dictionary<string, int> Flags { get; set; } = new();
         public HashSet<string> FiredEvents { get; set; } = new();
@@ -226,6 +227,11 @@ namespace RocGame
 
         public List<MoveOrder> Orders { get; set; } = new();
         public bool AutoFrontFill { get; set; } = true;
+        public bool AutoFortify { get; set; } = true;
+        public bool AutoRecruitMilitia { get; set; } = false;
+        public bool AutoBuildInfantry { get; set; } = false;
+        public Dictionary<string, int> MilitiaRecruited { get; set; } = new();
+        public Dictionary<string, int> AirStrikeCooldowns { get; set; } = new();
         public HashSet<string> PriorityTargets { get; set; } = new();
         public List<LogEntry> Logs { get; set; } = new();
         public List<IntelReport> IntelReports { get; set; } = new();
@@ -388,6 +394,13 @@ namespace RocGame
 
             RollFog(s);
             AssessPosture(s);
+            if (s.UsProtect && s.UsAid > 0.2)
+            {
+                s.Supply = Math.Min(100.0, s.Supply + 3.0);
+                foreach (var u in s.Units.Where(x => x.Str < 95.0))
+                    u.Str = Math.Min(100.0, u.Str + 4.0);
+                Log(s, "★ 【美軍顧問團馳援】MAAG 年度軍援武器物資運抵基隆！撥交戰略補給並加速全軍裝備整補。", "good");
+            }
             s.History.Add(Snapshot(s));
             Log(s, "1950年國府播遷來台，黃金存底僅餘約1.25億美元；本島亟待整編、舟山與海南孤懸海外且補給線逾千公里，是否收縮防線或跨海固守由統帥決斷。", "big");
             SampleIntelReports(s, isOpening: true);
@@ -397,6 +410,8 @@ namespace RocGame
 
         public static Unit AddUnit(GameState s, string type, string loc, double str = 100.0)
         {
+            // 民兵接納後一律併入國軍（編成正規步兵師）
+            if (type == "mil") type = "inf";
             if (loc == "TW" && s.Control.TryGetValue("TW", out var twCtrl) && twCtrl != Faction.ROC
                 && GameData.UnitTypes.TryGetValue(type, out var ut) && ut.Domain == UnitDomain.Land)
             {
@@ -410,22 +425,41 @@ namespace RocGame
         public static int FortificationLevel(GameState s, string id)
             => (int)(s.Fortification.TryGetValue(id, out int level) ? Clamp(level, 0, 3) : Clamp(GameData.Nodes[id].Fort, 0, 3));
 
+        public static int MaxMilitiaForProvince(GameState s, string id)
+        {
+            // 民心直接影響義民響應收編規模：
+            // 低民心（< 50）：民眾觀望，上限 2 支
+            // 標準民心（50～74）：上限 3 支
+            // 鼎盛民心（75～89）：簞食壺漿，上限 4 支
+            // 崇高民心（≥ 90）：全境起義響應，上限 5 支
+            if (s.Morale >= 90) return 5;
+            if (s.Morale >= 75) return 4;
+            if (s.Morale < 50) return 2;
+            return 3;
+        }
+
         public static (bool ok, string reason) RecruitLocalMilitia(GameState s, string id)
         {
             if (!GameData.Nodes.TryGetValue(id, out var node) || node.Kind != NodeKind.Mainland || s.Control[id] != Faction.ROC)
-                return (false, "只能在我方控制的大陸省分收編地方民兵。");
-            if (UnitsAt(s, id, UnitDomain.Land).Count(u => u.Type == "mil") >= 3)
-                return (false, "本省地方民兵已達 3 支上限。");
+                return (false, "只能在我方控制的大陸省分接納地方義勇。");
+            int maxMil = MaxMilitiaForProvince(s, id);
+            int recruited = s.MilitiaRecruited.GetValueOrDefault(id, 0);
+            if (recruited >= maxMil)
+                return (false, $"本省義勇動員已達當前民心上限（{maxMil} 師）。民心提高可動員更多義勇。");
             const double manpowerCost = 0.5;
             double moneyCost = 0.08 * PriceIndex(s);
-            if (s.Manpower < manpowerCost) return (false, "兵源不足，收編需要 0.5 兵源。");
-            if (s.Treasury < moneyCost) return (false, $"國庫不足，收編需要 {moneyCost:F2} 億美元。");
+            if (s.Manpower < manpowerCost) return (false, "兵源不足，動員需要 0.5 兵源。");
+            if (s.Treasury < moneyCost) return (false, $"國庫不足，動員需要 ${moneyCost:F2} 億美元。");
 
             s.Manpower -= manpowerCost;
             s.Treasury -= moneyCost;
-            var unit = AddUnit(s, "mil", id, 65.0);
+            s.MilitiaRecruited[id] = recruited + 1;
+            // 民心同步影響新整編部隊的初始作戰意志與戰力（50～85%）
+            double spawnStr = Math.Round(Math.Clamp(50.0 + (s.Morale - 50.0) * 0.45, 45.0, 85.0), 1);
+            // 民兵接納後一律併入國軍（編成正規步兵師）
+            var unit = AddUnit(s, "inf", id, spawnStr);
             unit.Moved = true;
-            Log(s, $"【{node.Name}】完成地方民兵收編（兵源 -0.5，國庫 -{moneyCost:F2}）。", "good");
+            Log(s, $"★ 【{node.Name}】地方反共義勇響應號召，經整編全數併入國軍（編成步兵師，戰力 {spawnStr:F0}%，兵源 -0.5，國庫 -${moneyCost:F2}億）！", "good");
             return (true, "");
         }
 
@@ -498,7 +532,13 @@ namespace RocGame
         public static double PrcGdp(GameState s)
             => GameData.Interp(GameData.CurvePrcGdp, s.Year) * s.PrcGdpMod * (1.0 - 0.85 * PrcLostIndustry(s));
 
-        public static double PrcStabFactor(GameState s) => 0.55 + 0.45 * (s.PrcStab / 100.0);
+        public static double PrcStabFactor(GameState s)
+        {
+            if (s.PrcStab <= 0) return 0.10; // 穩定度歸零，軍心徹底崩解
+            if (s.PrcStab < 25) return 0.10 + 0.35 * (s.PrcStab / 25.0); // 25以下軍閥自立、軍心渙散
+            if (s.PrcStab < 50) return 0.45 + 0.30 * ((s.PrcStab - 25.0) / 25.0); // 25..50 介於 0.45 ~ 0.75
+            return 0.55 + 0.45 * (s.PrcStab / 100.0); // 正常歷史基準 (65 時為 0.8425)
+        }
 
         public static double PrcTech(GameState s, SortedDictionary<int, double> curve)
             => 1.0 + (GameData.Interp(curve, s.Year) - 1.0) * s.PrcTechMod;
@@ -521,6 +561,14 @@ namespace RocGame
         public static double RocSea(GameState s, string z)
         {
             double p = UnitsAt(s, z, UnitDomain.Sea).Sum(u => GameData.UnitTypes["fleet"].Power * (u.Str / 100.0));
+            // 美軍第七艦隊馳援：協防台海（Z2）與東海（Z3），提供強大制海火力支援
+            if (s.UsProtect)
+            {
+                double usFactor = Math.Clamp(s.UsRel / 60.0, 0.5, 1.6);
+                if (z == "Z2") p += 18.0 * usFactor;      // 台灣海峽巡弋（Task Force 72）
+                else if (z == "Z3") p += 12.0 * usFactor; // 東海/大陳海域
+                else if (s.UsConsent > 0) p += 8.0 * usFactor; // 美方同意反攻時延伸支援黃海/南海
+            }
             double mult = (HasDirective(s, "dir_fort_islands") ? 1.08 : 1.0)
                         * (HasDirective(s, "dir_asymmetric") ? 1.10 : 1.0)
                         * (DominantStaffFaction(s) == "navair" ? 1.06 : 1.0);
@@ -530,6 +578,14 @@ namespace RocGame
         public static double RocAir(GameState s, string z)
         {
             double p = UnitsAt(s, z, UnitDomain.Air).Sum(u => GameData.UnitTypes["air"].Power * (u.Str / 100.0));
+            // 美軍第七艦隊馳援：航母戰鬥群艦載機群（TF 77）提供海峽空中掩護
+            if (s.UsProtect)
+            {
+                double usFactor = Math.Clamp(s.UsRel / 60.0, 0.5, 1.6);
+                if (z == "Z2") p += 14.0 * usFactor;      // 台海空防威懾
+                else if (z == "Z3") p += 9.0 * usFactor;  // 東海空巡
+                else if (s.UsConsent > 0) p += 6.0 * usFactor;
+            }
             double mult = (HasDirective(s, "dir_fort_islands") ? 1.08 : 1.0)
                         * (HasDirective(s, "dir_asymmetric") ? 1.10 : 1.0)
                         * (DominantStaffFaction(s) == "navair" ? 1.06 : 1.0);
@@ -557,8 +613,8 @@ namespace RocGame
 
         public static double UsDefense(GameState s)
         {
-            if (s.Year < 1951) return 0.0;
-            double def = s.UsProtect ? 20.0 + (s.UsRel + s.UsDefBonus) * 0.6 : Math.Max(0.0, s.UsRel + s.UsDefBonus - 55.0) * 0.5;
+            if (!s.UsProtect && s.Year < 1951) return 0.0;
+            double def = s.UsProtect ? 25.0 + (s.UsRel + s.UsDefBonus) * 0.7 : Math.Max(0.0, s.UsRel + s.UsDefBonus - 55.0) * 0.5;
             if (s.ActiveMutators != null && s.ActiveMutators.Contains("mut_aid_delayed") && s.Year < 1955)
                 def *= 0.5;
             return def;
@@ -843,6 +899,8 @@ namespace RocGame
                 if (GameData.Nodes[id].Zones.Any(z => RocSea(s, z) >= 5.0 || RocAir(s, z) >= 5.0))
                     return true;
             }
+            // 空軍優勢情蒐：當我軍於該省空域具備實質制空權（≥ 55%）時，空軍偵察機（黑貓/黑蝙蝠/戰術偵察）提供精確軍情
+            if (NodeAirSup(s, id) >= 0.55 && s.Units.Any(u => u.Type == "air" && u.Str >= 25.0)) return true;
             foreach (var kv in SightMap)
                 if (s.Control[kv.Key] == Faction.ROC && kv.Value.Contains(id)) return true;
             foreach (var adj in GameData.Nodes[id].Adj)
@@ -1390,10 +1448,11 @@ namespace RocGame
             foreach (string zone in issuedOrders.Select(o => o.Zone).Where(z => !string.IsNullOrEmpty(z)).Distinct())
                 AutoDeployReserveEscorts(s, zone);
 
-            // 若未進兩棲籌備（例如空降或陸路直攻），非陸路且條約仍在時立即判定違約；兩棲海上登陸待正式起航瞬間判定
-            if (issuedOrders.Any(o => !o.IsPrep && o.Kind != "land" && WouldBreakTreaty(s, dest)))
+            // 若未進兩棲籌備（例如空降或陸路直攻），條約仍在時立即判定違約；兩棲海上登陸待正式起航瞬間判定
+            if (issuedOrders.Any(o => !o.IsPrep && WouldBreakTreaty(s, dest)))
             {
                 s.Flags["treatyBroken"] = 1;
+                s.Flags["treatyWarned"] = 1;
                 s.UsRel -= 30;
                 s.UsAid = 0;
                 s.UsProtect = false;
@@ -1692,7 +1751,7 @@ namespace RocGame
         {
             if (string.IsNullOrEmpty(loc) || !GameData.Nodes.TryGetValue(loc, out var n)) return false;
             if (!s.Control.TryGetValue(loc, out var ctrl) || ctrl != Faction.ROC) return false;
-            if (loc == "TW") return true;
+            if (loc == "TW" || loc == "KM" || loc == "PH") return true;
             return n.Kind == NodeKind.Mainland && n.Port && (!s.Garrison.TryGetValue(loc, out double gar) || gar <= 0.05);
         }
 
@@ -1700,6 +1759,8 @@ namespace RocGame
         {
             var list = new List<string>();
             if (IsBuildBase(s, "TW")) list.Add("TW");
+            if (IsBuildBase(s, "KM")) list.Add("KM");
+            if (IsBuildBase(s, "PH")) list.Add("PH");
             foreach (var id in GameData.MainlandIds)
                 if (IsBuildBase(s, id)) list.Add(id);
             return list;
@@ -1711,7 +1772,7 @@ namespace RocGame
             if (T.NoBuild) return (false, "停用自行整編");
             if (T.Domain == UnitDomain.Land)
             {
-                if (!IsBuildBase(s, loc)) return (false, "須選我方控制港口");
+                if (!IsBuildBase(s, loc)) return (false, "須選我方控制基地");
             }
             else if (!s.Control.TryGetValue("TW", out var tf) || tf != Faction.ROC)
             {
@@ -1719,8 +1780,15 @@ namespace RocGame
             }
             if (!string.IsNullOrEmpty(T.ReqTech) && !s.Techs.Contains(T.ReqTech))
                 return (false, "需科技：" + GameData.Techs[T.ReqTech].Name);
-            if (s.Treasury < UnitCost(s, t)) return (false, "國庫不足");
-            if (s.Manpower < T.Man) return (false, "兵源不足");
+            double baseCost = UnitCost(s, t);
+            double px = PriceIndex(s);
+            // 國庫充盈時可自動以招募津貼補足兵源（每缺 1.0 兵源補償 $0.10億）
+            double extraBounty = (s.Manpower < T.Man) ? 0.10 * px * (T.Man - Math.Max(0, s.Manpower)) : 0.0;
+            if (s.Treasury < baseCost + extraBounty)
+            {
+                if (s.Treasury < baseCost) return (false, "國庫不足");
+                return (false, "兵源與募兵經費不足");
+            }
             return (true, "");
         }
 
@@ -1730,18 +1798,230 @@ namespace RocGame
             string spawnLoc = T.Domain == UnitDomain.Land ? loc : "TW";
             var c = CanBuild(s, t, spawnLoc);
             if (!c.ok) return c;
-            s.Treasury -= UnitCost(s, t);
-            s.Manpower -= T.Man;
+            double baseCost = UnitCost(s, t);
+            double px = PriceIndex(s);
+            double extraBounty = 0.0;
+            if (s.Manpower < T.Man)
+            {
+                extraBounty = 0.10 * px * (T.Man - Math.Max(0, s.Manpower));
+                s.Manpower = 0.0;
+            }
+            else
+            {
+                s.Manpower -= T.Man;
+            }
+            s.Treasury -= (baseCost + extraBounty);
             var u = AddUnit(s, t, spawnLoc, 65.0);
             u.Moved = true;
-            Log(s, $"新編成：{T.Name}（於{GameData.Nodes[spawnLoc].Name}整訓，戰力 65%）");
+            string bountyMsg = extraBounty > 0 ? $"（國庫撥付募兵安家津貼 ${extraBounty:F2}億）" : "";
+            Log(s, $"★ 新編成：{T.Name}（於【{GameData.Nodes[spawnLoc].Name}】整訓出列，戰力 65%{bountyMsg}）。", "good");
             return (true, "");
+        }
+
+        public static (bool ok, string reason) RecruitManpowerWithTreasury(GameState s)
+        {
+            double px = PriceIndex(s);
+            double cost = Math.Round(0.20 * px, 2);
+            if (s.Treasury < cost) return (false, $"國庫不足，專案募兵需要 ${cost:F2} 億美元。");
+            s.Treasury -= cost;
+            s.Manpower += 3.0;
+            Log(s, $"★ 國防部專案撥付 ${cost:F2} 億發放招募津貼，常備兵源補充 +3.0 師（當前兵源：{s.Manpower:F1} 師）！", "good");
+            return (true, "");
+        }
+
+        // ---------- 主動戰術空襲系統（Air Strike） ----------
+        public static (bool ok, string reason) CanAirStrike(GameState s, string nid)
+        {
+            if (string.IsNullOrEmpty(nid) || !GameData.Nodes.TryGetValue(nid, out var n))
+                return (false, "無效目標省分");
+            if (!s.Control.TryGetValue(nid, out var ctrl) || ctrl == Faction.ROC)
+                return (false, "只能空襲敵方控制之省分");
+            if (!s.Garrison.TryGetValue(nid, out double gar) || gar <= 0.05)
+                return (false, "目標省分無敵軍守備部隊");
+            if (s.AirStrikeCooldowns != null && s.AirStrikeCooldowns.TryGetValue(nid, out int cd) && cd > 0)
+                return (false, $"空襲整補冷卻中（剩餘 {cd} 天）");
+
+            double airSup = NodeAirSup(s, nid);
+            bool inRange = n.Zones.Length > 0 || airSup >= 0.20 || n.Adj.Any(a => s.Control.GetValueOrDefault(a) == Faction.ROC);
+            if (!inRange) return (false, "超出我方戰機作戰半徑（需具備制空或鄰接基地）");
+
+            var readyAir = GetStrikeAirWing(s, nid);
+            if (readyAir == null)
+                return (false, "無待命之空軍聯隊（需戰備率 ≥ 25% 且本回合未行動）");
+
+            double cost = Math.Round(0.06 * PriceIndex(s), 2);
+            if (s.Treasury < cost)
+                return (false, $"經費不足，戰術空襲需要 ${cost:F2} 億美元（油料與彈藥）");
+
+            return (true, "");
+        }
+
+        public static Unit GetStrikeAirWing(GameState s, string nid)
+        {
+            if (string.IsNullOrEmpty(nid) || !GameData.Nodes.TryGetValue(nid, out var n)) return null;
+            if (n.Zones.Length > 0)
+            {
+                var zoneAir = s.Units.FirstOrDefault(u => u.Type == "air" && !u.Moved && u.Str >= 25.0 && n.Zones.Contains(u.Loc));
+                if (zoneAir != null) return zoneAir;
+            }
+            var twAir = s.Units.FirstOrDefault(u => u.Type == "air" && !u.Moved && u.Str >= 25.0 && u.Loc == "TW");
+            if (twAir != null) return twAir;
+            return s.Units.FirstOrDefault(u => u.Type == "air" && !u.Moved && u.Str >= 25.0);
+        }
+
+        public static (bool ok, double damage, double flakLoss, string reason) AirStrikeProvince(GameState s, string nid)
+        {
+            var chk = CanAirStrike(s, nid);
+            if (!chk.ok) return (false, 0, 0, chk.reason);
+
+            var n = GameData.Nodes[nid];
+            var airWing = GetStrikeAirWing(s, nid);
+            double cost = Math.Round(0.06 * PriceIndex(s), 2);
+            s.Treasury -= cost;
+            airWing.Moved = true;
+
+            double airSup = NodeAirSup(s, nid);
+            double airPower = (airWing.Str / 100.0) * s.AirTech * (1.0 + 0.6 * airSup);
+            double baseDmg = 0.25 + 0.35 * airPower * (0.8 + 0.4 * Rng(s));
+            double damage = Math.Round(Math.Clamp(baseDmg, 0.15, s.Garrison[nid]), 2);
+            s.Garrison[nid] = Math.Max(0.0, s.Garrison[nid] - damage);
+
+            bool fortDamaged = false;
+            if (s.Fortification.TryGetValue(nid, out int fort) && fort > 0 && Rng(s) < 0.25)
+            {
+                s.Fortification[nid] = fort - 1;
+                fortDamaged = true;
+            }
+
+            double flakLoss = Math.Round(Math.Max(0.5, 6.0 * (1.0 - airSup) * (0.6 + 0.8 * Rng(s))), 1);
+            airWing.Str = Math.Max(5.0, airWing.Str - flakLoss);
+
+            s.AirStrikeCooldowns[nid] = 4;
+
+            string fortTxt = fortDamaged ? "，並炸毀敵軍陣地工事 1 級" : "";
+            Log(s, $"✈ 【{n.Name}戰術空襲】空軍第 {airWing.Id} 聯隊精準投彈！重創共軍守軍 {damage:F2} 師（敵守備降至 {s.Garrison[nid]:F2} 師{fortTxt}，戰機防空耗損 -{flakLoss:F1}%，國庫 -${cost:F2}億）。", "good");
+            AddMemoir(s, "空襲打擊", $"空襲{n.Name}", $"派遣空軍對【{n.Name}】實施戰術空襲，削弱共軍守備 {damage:F2} 師。", 2);
+
+            return (true, damage, flakLoss, "");
+        }
+
+        // ---------- 戰術核打擊系統（Tactical Nuclear Strike） ----------
+        public static (bool ok, string reason) CanNukeStrike(GameState s, string nid)
+        {
+            if (s == null) return (false, "遊戲狀態未初始化");
+            if (s.NukeStockpile <= 0) return (false, "無戰術核彈頭庫存（需研發核武科技）");
+            if (string.IsNullOrEmpty(nid) || !GameData.Nodes.TryGetValue(nid, out var n))
+                return (false, "無效目標省分");
+            if (n.Kind != NodeKind.Mainland)
+                return (false, "僅限對大陸敵佔區實施戰術核打擊");
+            if (s.Control.TryGetValue(nid, out var ctrl) && ctrl == Faction.ROC)
+                return (false, "目標省分已由我軍光復");
+            return (true, "");
+        }
+
+        public static (bool ok, double damage, string reason) NukeStrike(GameState s, string nid)
+        {
+            var chk = CanNukeStrike(s, nid);
+            if (!chk.ok) return (false, 0, chk.reason);
+
+            var n = GameData.Nodes[nid];
+            s.NukeStockpile = Math.Max(0, s.NukeStockpile - 1);
+            double garBefore = s.Garrison.GetValueOrDefault(nid, 0.0);
+            double damage = Math.Round(garBefore * 0.75, 1);
+            double garAfter = Math.Max(0.0, Math.Round(garBefore - damage, 1));
+            s.Garrison[nid] = garAfter;
+            s.Fortification[nid] = 0;
+
+            // 中共政權穩定度重挫
+            s.PrcStab = Math.Max(0.0, s.PrcStab - 18.0);
+            s.Morale = Math.Min(100.0, s.Morale + 6.0);
+            s.UsRel = Math.Max(0.0, s.UsRel - 12.0);
+
+            Log(s, $"☢【天馬戰術核打擊】我軍對〔{n.Name}〕實施戰術核打擊！摧毀敵防禦工事與 {damage:F1} 師主力守軍（敵守備降至 {garAfter:F1} 師），中共中樞穩定度重挫 18%！核彈庫存剩餘 {s.NukeStockpile} 枚。", "big");
+            AddMemoir(s, "戰術核平", $"核擊{n.Name}", $"對【{n.Name}】實施戰術核打擊，消滅共軍主力 {damage:F1} 師，徹底粉碎當面工事防線！", 3);
+
+            return (true, damage, "");
+        }
+
+        // ---------- 戰地軍務三大自動化（防線加固 / 收編民兵 / 編成步兵） ----------
+        public static void StepAutoDefenseAndRecruitment(GameState s)
+        {
+            if (s.Over != null || s.PendingEvents.Count > 0) return;
+
+            double px = PriceIndex(s);
+            double safetyTreasury = Math.Max(0.40 * px, s.Gdp * 0.025);
+
+            // 1. 自動防線加固
+            if (s.AutoFortify)
+            {
+                foreach (var id in HeldMainland(s))
+                {
+                    int lvl = FortificationLevel(s, id);
+                    if (lvl >= 3) continue;
+                    double cost = 0.12 * (lvl + 1) * px;
+                    if (s.Treasury >= cost + safetyTreasury)
+                    {
+                        var res = FortifyProvince(s, id);
+                        if (res.ok)
+                        {
+                            var lastLog = s.Logs.LastOrDefault();
+                            if (lastLog != null && !lastLog.Msg.StartsWith("[自動]"))
+                                lastLog.Msg = "[自動] " + lastLog.Msg;
+                        }
+                    }
+                }
+            }
+
+            // 2. 自動收編民兵
+            if (s.AutoRecruitMilitia)
+            {
+                foreach (var id in HeldMainland(s))
+                {
+                    int mCount = UnitsAt(s, id, UnitDomain.Land).Count(u => u.Type == "mil");
+                    if (mCount >= MaxMilitiaForProvince(s, id)) continue;
+                    double cost = 0.08 * px;
+                    if (s.Manpower >= 1.5 && s.Treasury >= cost + safetyTreasury)
+                    {
+                        var res = RecruitLocalMilitia(s, id);
+                        if (res.ok)
+                        {
+                            var lastLog = s.Logs.LastOrDefault();
+                            if (lastLog != null && !lastLog.Msg.StartsWith("[自動]"))
+                                lastLog.Msg = "[自動] " + lastLog.Msg;
+                        }
+                    }
+                }
+            }
+
+            // 3. 自動編成步兵
+            if (s.AutoBuildInfantry)
+            {
+                int landCount = s.Units.Count(u => GameData.UnitTypes[u.Type].Domain == UnitDomain.Land);
+                double infCost = UnitCost(s, "inf");
+                if (landCount < 25 && s.Manpower >= 2.0 && s.Treasury >= infCost + safetyTreasury)
+                {
+                    var bases = BuildBases(s);
+                    if (bases.Count > 0)
+                    {
+                        string bestBase = bases.OrderBy(b => UnitsAt(s, b, UnitDomain.Land).Count).FirstOrDefault();
+                        if (bestBase != null && CanBuild(s, "inf", bestBase).ok)
+                        {
+                            var res = BuildUnit(s, "inf", bestBase);
+                            if (res.ok)
+                            {
+                                var lastLog = s.Logs.LastOrDefault();
+                                if (lastLog != null && !lastLog.Msg.StartsWith("[自動]"))
+                                    lastLog.Msg = "[自動] " + lastLog.Msg;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         public static bool TechAvailable(GameState s, TechDef t)
         {
             if (s.Techs.Contains(t.Id)) return false;
-            if (s.Year < t.Year) return false;
             if (!string.IsNullOrEmpty(t.ReqFlag) && !s.HasFlag(t.ReqFlag)) return false;
             if (t.Req != null && t.Req.Any(r => !s.Techs.Contains(r))) return false;
             return true;
@@ -1835,7 +2115,6 @@ namespace RocGame
         {
             if (s.Techs.Contains(t.Id)) return "✔ 已完成";
             var missing = new List<string>();
-            if (s.Year < t.Year) missing.Add($"需至 {t.Year} 年");
             if (!string.IsNullOrEmpty(t.ReqFlag) && !s.HasFlag(t.ReqFlag))
                 missing.Add(t.ReqFlag == "prcNuke" ? "需中共先核試爆" : $"需事件條件");
             if (t.Req != null)
@@ -2232,6 +2511,15 @@ namespace RocGame
                         Log(s, $"策反工作在{GameData.Nodes[id].Name}受挫，聯絡線暫時隱蔽待機。", "bad");
                     }
                 }
+            },
+            new ActionDef {
+                Id = "nuke_strike", Cat = "情報", Name = "☢ 戰術核打擊",
+                Desc = "需戰術核彈頭庫存。對大陸敵佔省分實施核平打擊：摧毀 75% 守軍主力與所有防禦工事，中共穩定度重挫 18%！",
+                NeedTarget = true,
+                Cost = _ => 0,
+                Avail = s => s.NukeStockpile > 0,
+                TargetOk = (s, id) => CanNukeStrike(s, id).ok,
+                Execute = (s, id) => NukeStrike(s, id)
             }
         };
 
@@ -2540,9 +2828,18 @@ namespace RocGame
             var units = UnitsAt(s, nid, UnitDomain.Land);
             double air = NodeAirSup(s, nid);
             bool wasUssr = s.Control[nid] == Faction.USSR;
-            double rp = RocPowerAt(s, nid, units, rocAttacking, landedIds) * (1.0 + 0.6 * air);
+            double usReliefBonus = 0.0;
+            if (s.UsProtect && (GameData.Nodes[nid].Kind == NodeKind.Island || GameData.Nodes[nid].Port || s.UsConsent > 0))
+            {
+                // 美軍第七艦隊航母艦載機與巡洋艦艦砲戰術火力馳援
+                double usRelFactor = Math.Clamp(s.UsRel / 60.0, 0.6, 1.5);
+                usReliefBonus = (rocAttacking ? (s.UsConsent > 0 ? 0.20 : 0.0) : 0.30) * usRelFactor;
+            }
+            double rp = RocPowerAt(s, nid, units, rocAttacking, landedIds) * (1.0 + 0.6 * air) * (1.0 + usReliefBonus);
             double pp = EnemyPowerAt(s, nid, s.Garrison[nid], rocAttacking) * (1.0 + 0.6 * (1.0 - air));
             if (rp <= 0 || pp <= 0) return;
+            if (usReliefBonus > 0.05)
+                Log(s, $"★ 【美軍第七艦隊馳援】美軍航母艦載機群與巡洋艦艦砲協同打擊，為我軍提供 +{usReliefBonus * 100:F0}% 戰術火力支援！", "good");
 
             double r = rp / pp;
             double rr = Clamp(r, 0.25, 4.0);
@@ -2567,6 +2864,19 @@ namespace RocGame
             s.EnemyLoss += pl;
             string enemyName = wasUssr ? "俄軍" : "共軍";
             var n = GameData.Nodes[nid];
+
+            // 敵方政權穩定度低落時，潰敗守軍大批投誠歸順國軍，補充兵源與繳獲戰備補給
+            if (!wasUssr && s.PrcStab < 45 && pl >= 0.3)
+            {
+                double defectFrac = Math.Clamp((50.0 - s.PrcStab) / 75.0, 0.25, 0.70);
+                double defectMan = Math.Round(pl * defectFrac, 1);
+                if (defectMan >= 0.2)
+                {
+                    s.Manpower = Math.Min(60.0, s.Manpower + defectMan);
+                    s.Supply = Math.Min(100.0, s.Supply + Math.Round(defectMan * 3.0, 1));
+                    Log(s, $"★ 敵軍士氣瓦解！前線共軍官兵起義投誠，我軍收編補充兵源 +{defectMan:F1} 師、繳獲戰備補給 +{Math.Round(defectMan * 3.0, 0):F0}！", "good");
+                }
+            }
 
             if (s.Garrison[nid] <= 0 && after > 0)
             {
@@ -2660,6 +2970,7 @@ namespace RocGame
                     if (WouldBreakTreaty(s, sample.To))
                     {
                         s.Flags["treatyBroken"] = 1;
+                        s.Flags["treatyWarned"] = 1;
                         s.UsRel -= 30;
                         s.UsAid = 0;
                         s.UsProtect = false;
@@ -2851,9 +3162,24 @@ namespace RocGame
             double dayDt = 1.0 / (DateTime.IsLeapYear(s.Year) ? 366.0 : 365.0);
             StepResearch(s, dayDt, chargeDailySurcharge: true);
 
+            if (s.AirStrikeCooldowns != null && s.AirStrikeCooldowns.Count > 0)
+            {
+                var cdKeys = s.AirStrikeCooldowns.Keys.ToList();
+                foreach (var k in cdKeys)
+                {
+                    s.AirStrikeCooldowns[k]--;
+                    if (s.AirStrikeCooldowns[k] <= 0) s.AirStrikeCooldowns.Remove(k);
+                }
+            }
+
             if (s.AutoFrontFill && s.Day % 3 == 1 && s.PendingEvents.Count == 0 && s.Over == null)
             {
                 AutoBalanceLandForces(s, quiet: true);
+            }
+
+            if (s.Day % 3 == 2 && s.PendingEvents.Count == 0 && s.Over == null)
+            {
+                StepAutoDefenseAndRecruitment(s);
             }
 
             if (s.Day == 1 || s.Day == 10 || s.Day == 20)
@@ -2907,6 +3233,18 @@ namespace RocGame
                 s.NextPrcDoctrine = candidates[pick];
                 Log(s, "◈ 對岸進入新一輪五年戰略調整期，當面兵力部署出現重組跡象。", "info");
             }
+            if (s.UsProtect && s.UsAid > 0.2)
+            {
+                s.Supply = Math.Min(100.0, s.Supply + 3.0);
+                foreach (var u in s.Units.Where(x => x.Str < 95.0))
+                    u.Str = Math.Min(100.0, u.Str + 4.0);
+                Log(s, "★ 【美軍顧問團馳援】MAAG 年度軍援武器物資運抵基隆！撥交戰略補給並加速全軍裝備整補。", "good");
+            }
+            if ((s.Techs.Contains("nuke_weapon") || s.Techs.Contains("tactical_nuke")) && s.NukeStockpile < 5)
+            {
+                s.NukeStockpile++;
+                Log(s, $"☢ 龍潭核研所與中科院完成年度核組件提煉，戰術核彈頭庫存 +1（現有 {s.NukeStockpile} 枚）。", "warn");
+            }
             s.History.Add(Snapshot(s));
         }
 
@@ -2920,10 +3258,11 @@ namespace RocGame
 
             if (resolveOrders)
             {
-                bool breach = s.Orders.Any(o => WouldBreakTreaty(s, o.To) && o.Kind != "land");
+                bool breach = s.Orders.Any(o => WouldBreakTreaty(s, o.To));
                 if (breach)
                 {
                     s.Flags["treatyBroken"] = 1;
+                    s.Flags["treatyWarned"] = 1;
                     s.UsRel -= 30; s.UsAid = 0; s.UsProtect = false;
                     Log(s, "國府片面發動反攻，違反中美共同防禦條約換文！美方宣布停止援助並撤回協防承諾。", "bad");
                 }
@@ -3212,18 +3551,20 @@ namespace RocGame
             }
             double docReinfMult = s.PrcDoctrine == "internal_purge" ? 0.90 : 1.0;
             double mutHarvestMult = (s.ActiveMutators != null && s.ActiveMutators.Contains("mut_prc_harvest") && s.Year <= 1959) ? 1.10 : 1.0;
+            // 穩定度急遽崩潰時，徵兵體系瓦解，增援大幅削減；穩定度歸零時完全停止增援！
+            double stabReinfPenalty = s.PrcStab <= 0 ? 0.0 : (s.PrcStab < 25.0 ? Math.Pow(s.PrcStab / 25.0, 1.5) : 1.0);
             double reinf = (10.0 + (s.Year - 1950) * 0.18) * PrcStabFactor(s) * s.PrcReinfMod
                          * (s.Techs.Contains("tienma") ? 0.75 : 1.0) * (1.0 - 0.5 * s.PrcSovTension) * (1.0 - 0.6 * PrcLostIndustry(s))
-                         * mobScale * docReinfMult * mutHarvestMult * dt;
-            if (heldCount >= 2)
+                         * mobScale * docReinfMult * mutHarvestMult * stabReinfPenalty * dt;
+            if (heldCount >= 2 && s.PrcStab > 15.0)
             {
-                reinf += (24.0 + Math.Min(48.0, heldCount * 7.0)) * PrcStabFactor(s) * (1.0 - 0.45 * PrcLostIndustry(s)) * dt;
-                // 國軍深入兩省以上時，內地縱深守軍緊急抽調多餘預備隊馳援前線隣接省區
+                reinf += (24.0 + Math.Min(48.0, heldCount * 7.0)) * PrcStabFactor(s) * (1.0 - 0.45 * PrcLostIndustry(s)) * stabReinfPenalty * dt;
+                // 國軍深入兩省以上時，內地縱深守軍緊急抽調多餘預備隊馳援前線隣接省區（僅當政權穩定 > 20% 時有效）
                 var prcFrontPool = GameData.MainlandIds
                     .Where(id => s.Control[id] == Faction.PRC && GameData.Nodes[id].Adj.Any(a => s.Control[a] == Faction.ROC || UnitsAt(s, a, UnitDomain.Land).Count > 0))
                     .OrderBy(id => s.Garrison[id])
                     .ToList();
-                if (prcFrontPool.Count > 0)
+                if (prcFrontPool.Count > 0 && s.PrcStab > 20.0)
                 {
                     int fIdx = 0;
                     foreach (var rearId in GameData.MainlandIds)
@@ -3583,6 +3924,7 @@ namespace RocGame
                 double psyBoost = (radio ? 1.4 : 0) + (cyber ? 1.0 : 0) + (relief ? 0.6 : 0) + (kinHorn && (id == "FJ" || id == "ZJ") ? 1.2 : 0);
                 s.Unrest[id] += ((adjRoc ? 3.5 : 0) - 1.5 + (s.PrcStab < 40 ? 2.5 : 0) + psyBoost) * dt;
             }
+
             if (s.PrcDoctrine == "internal_purge")
             {
                 var prcProvs = GameData.MainlandIds.Where(id => s.Control[id] == Faction.PRC).ToList();
@@ -3666,7 +4008,7 @@ namespace RocGame
                     return;
                 }
                 bool hasMajor = held.Contains("JS") || held.Contains("GD") || held.Contains("HN");
-                if (held.Count >= 5 && hasMajor) { Finish(s, "nanbei"); return; }
+                if (held.Count >= 5 && hasMajor) { Finish(s, ussr.Count > 0 ? "split_ussr" : "nanbei"); return; }
                 if (held.Count >= 1) { Finish(s, "beachhead"); return; }
                 if (!s.HasFlag("lostAnyIsland") && s.Control["TW"] == Faction.ROC
                     && new[] { "TW", "PH", "KM", "MZ" }.All(id => s.Control.GetValueOrDefault(id) == Faction.ROC)

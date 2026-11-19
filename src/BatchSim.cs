@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -292,6 +292,10 @@ namespace RocGame
                     if (basePol == "end_split_ussr") return 0;
                     if (basePol == "end_collapse" || basePol == "end_nanbei" || basePol == "end_beachhead") return 1;
                 }
+                if (eid == "zhenbao_1969" && ev.Choices.Count >= 2)
+                {
+                    if (basePol == "end_split_ussr") return 0;
+                }
                 if (eid.StartsWith("dyn_armistice_offer") && ev.Choices.Count >= 2)
                 {
                     return 1; // keep fighting until 2025 for non-armistice archetypes (armistice handled by econ)
@@ -423,8 +427,9 @@ namespace RocGame
                     if (txt.Contains("情報") || txt.Contains("破襲") || txt.Contains("起義") || txt.Contains("動盪")) sc += 3.5;
                     if (txt.Contains("經濟") || txt.Contains("科研") || txt.Contains("登陸") || txt.Contains("兵源")) sc += 2.5;
                     if (txt.Contains("增援") || txt.Contains("改駐")) sc += 2.0;
-                    if (basePol == "end_split_ussr" && (txt.Contains("莫斯科") || txt.Contains("蘇聯") || txt.Contains("聯俄") || txt.Contains("牽制"))) sc += 3.0;
-                    if (txt.Contains("引狼入室") || txt.Contains("城下") || txt.Contains("接受會談")) sc -= 8;
+                    if (basePol == "end_split_ussr" && (txt.Contains("莫斯科") || txt.Contains("蘇聯") || txt.Contains("聯俄") || txt.Contains("牽制") || txt.Contains("南北夾擊") || txt.Contains("引狼入室"))) sc += 5.0;
+                    if (basePol != "end_split_ussr" && txt.Contains("引狼入室")) sc -= 8;
+                    if (txt.Contains("城下") || txt.Contains("接受會談")) sc -= 8;
                 }
                 else if (basePol == "end_junta")
                 {

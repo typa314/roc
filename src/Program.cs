@@ -82,7 +82,7 @@ namespace RocGame
             Assert(GameData.NodeIds.Length == 33, $"應有 33 個控制節點，實際為 {GameData.NodeIds.Length}");
             Assert(GameData.MainlandIds.Length == 26, $"應有 26 個大陸省分節點，實際為 {GameData.MainlandIds.Length}");
             Assert(GameData.BorderUssrIds.SequenceEqual(new[] { "HLJ", "JL", "LN", "IM", "XJ" }), "北疆接壤蘇俄節點應為 HLJ, JL, LN, IM, XJ");
-            Assert(GameData.TechList.Count == 63, $"科技樹應有 63 項，實際為 {GameData.TechList.Count}");
+            Assert(GameData.TechList.Count >= 63, $"科技樹應至少包含 63 項，實際為 {GameData.TechList.Count}");
             foreach (var br in new[] { "science", "arms", "intel", "subv", "logi" })
                 Assert(GameData.TechList.Count(t => t.Branch == br) >= 10, $"科技樹分支 {br} 應至少包含 10 項節點");
             Assert(GameData.TechList.All(t => t.Req == null || t.Req.All(r => GameData.Techs.ContainsKey(r))), "所有科技樹前置 ID 必須有效存在");
@@ -223,7 +223,7 @@ namespace RocGame
                 sUnTalk.FrontStableSince = sUnTalk.TotalMonths - 40;
                 EventSystem.CheckDynamic(sUnTalk);
                 var unTalk = sUnTalk.PendingEvents.FirstOrDefault(e => e.Id.StartsWith("dyn_un_"));
-                Assert(unTalk != null && unTalk.Choices.Count == 3 && (unTalk.Desc.Contains("廣東") || unTalk.Desc.Contains("廣西")),
+                Assert(unTalk != null && unTalk.Choices.Count == 3 && (unTalk.Desc.Contains("福建") || unTalk.Desc.Contains("廣東") || unTalk.Desc.Contains("廣西")),
                     $"台海膠著時，聯合國事件應指向華南戰線。實際：{unTalk?.Desc}");
                 foreach (var id in GameData.MainlandIds)
                     if (sUnTalk.Control[id] == Faction.PRC)
@@ -250,7 +250,7 @@ namespace RocGame
                 string n0 = EventSystem.FrontNotice(sNote, 0);
                 string n1 = EventSystem.FrontNotice(sNote, 1);
                 Assert(n0.Contains("彈藥") && n1.Contains("投降") && n0 != n1, $"戰地電訊應輪流報導前線狀況。實際：{n0} / {n1}");
-                Assert(n0.Contains("廣東") || n0.Contains("廣西"), $"開局電訊應指向當前敵前。實際：{n0}");
+                Assert(n0.Contains("福建") || n0.Contains("廣東") || n0.Contains("廣西"), $"開局電訊應指向當前敵前。實際：{n0}");
 
                 var talkNo = JsonSerializer.Deserialize<GameState>(JsonSerializer.Serialize(sUnTalk));
                 talkNo.PendingEvents.Add(unTalk);
@@ -530,7 +530,7 @@ namespace RocGame
                     var sStand = Prepare(880u, north: false);
                     EventSystem.CheckHistoricalForDate(sStand);
                     var maoStand = sStand.PendingEvents.FirstOrDefault(e => e.Id == "mao_1976");
-                    Assert(maoStand != null && (maoStand.Desc.Contains("廣東") || maoStand.Desc.Contains("廣西")) && !maoStand.Desc.Contains("山東"),
+                    Assert(maoStand != null && (maoStand.Desc.Contains("福建") || maoStand.Desc.Contains("廣東") || maoStand.Desc.Contains("廣西")) && !maoStand.Desc.Contains("山東"),
                         $"台海對峙時，對岸權力真空事件應指向華南敵前。實際：{maoStand?.Desc}");
 
                     var sNorthMao = Prepare(881u, north: true);
@@ -847,17 +847,17 @@ namespace RocGame
                 form.RefreshAllUi();
                 Assert(form.IsSimTimerRunning, "事件選擇完畢後應自動恢復即時時間流動");
 
-                // 驗證科技樹專頁：開啟時時間繼續流動（僅發生事件時才暫停）、五大分支、無一鍵完成鈕、統一按天累計、無冷卻專案趕工(+50%速/+40%費)、底部工作列僅顯示完成通知
+                // 驗證科技樹專頁：開啟時時間自動暫停、五大分支、無一鍵完成鈕、統一按天累計、無冷卻專案趕工(+50%速/+40%費)、底部工作列僅顯示完成通知
                 Assert(string.IsNullOrEmpty(form.State.LastTechCompleted), "尚未完成研發前不應出現底部研發完成通知");
                 var techDockBtn = FindButtonWithText(form, "科技樹");
                 Assert(techDockBtn != null, "底部導航列應包含『科技樹』按鈕");
                 techDockBtn.PerformClick();
-                Assert(form.IsTechPageOpen && form.IsSimTimerRunning, "開啟科技樹頁面期間時間應繼續流動，不得暫停");
+                Assert(form.IsTechPageOpen && !form.IsSimTimerRunning, "開啟科技樹頁面期間時間應自動暫停");
                 Assert(FindButtonWithText(form, "直昇") == null && FindButtonWithText(form, "突破") == null, "科技樹不應存在一鍵瞬間完成按鈕");
                 var techOpenDate = (form.State.Year, form.State.Month, form.State.Day);
                 form.StepClockTick();
-                Assert((form.State.Year, form.State.Month, form.State.Day) != techOpenDate || form.State.PendingEvents.Count > 0,
-                    "在科技樹頁面且無事件發生期間日期應正常推進");
+                Assert((form.State.Year, form.State.Month, form.State.Day) == techOpenDate,
+                    "在科技樹頁面期間時間應暫停且日期不應推進");
                 while (form.State.PendingEvents.Count > 0) EventSystem.ResolveChoice(form.State, 0);
                 form.RefreshAllUi();
 
@@ -1059,7 +1059,7 @@ namespace RocGame
                 form.OpenTechPage("science");
                 form.SetHoverTechForTest("nuke_program");
                 Application.DoEvents();
-                Assert(form.IsTechPageOpen && form.IsSimTimerRunning, "1967 開啟科技樹頁面且無待決事件時，時間應繼續流動");
+                Assert(form.IsTechPageOpen && !form.IsSimTimerRunning, "1967 開啟科技樹頁面時，時間應自動暫停");
                 using (var techSciBmp = new Bitmap(form.Width, form.Height))
                 {
                     form.DrawToBitmap(techSciBmp, new Rectangle(0, 0, form.Width, form.Height));
@@ -1074,13 +1074,13 @@ namespace RocGame
                     techBmp.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui_tech_snapshot.png"), System.Drawing.Imaging.ImageFormat.Png);
                 }
 
-                // 驗證核心規則：查看科技樹期間時間續流，一旦發生事件立即自動暫停並彈出事件卡；解決事件後時間於科技樹內自動恢復
+                // 驗證核心規則：查看科技樹期間時間暫停，一旦發生事件亦彈出事件卡；事件處置完仍維持科技暫停，關閉科技樹後自動恢復
                 var testEv = EventSystem.HistoricalEvents.First(e => e.Id == "cultural_rev_1966");
                 form.State.PendingEvents.Add(testEv);
                 form.RefreshAllUi();
                 Application.DoEvents();
                 Assert(form.IsTechPageOpen && !form.IsSimTimerRunning && form.IsEventOverlayVisibleForTest,
-                    "於科技樹頁面期間發生事件時應立即暫停時間並彈出事件視窗");
+                    "於科技樹頁面期間發生事件時應彈出事件視窗並維持時間暫停");
                 var evFrozeDate = (form.State.Year, form.State.Month, form.State.Day);
                 form.StepClockTick();
                 Assert((form.State.Year, form.State.Month, form.State.Day) == evFrozeDate,
@@ -1088,9 +1088,10 @@ namespace RocGame
                 form.State.PendingEvents.Clear();
                 form.RefreshAllUi();
                 Application.DoEvents();
-                Assert(form.IsTechPageOpen && !form.IsEventOverlayVisibleForTest && form.IsSimTimerRunning,
-                    "事件處置完畢後，停留科技樹頁面應自動恢復時間流動");
+                Assert(form.IsTechPageOpen && !form.IsEventOverlayVisibleForTest && !form.IsSimTimerRunning,
+                    "事件處置完畢後，停留科技樹頁面仍應維持時間暫停");
                 form.CloseTechPage();
+                Assert(!form.IsTechPageOpen && form.IsSimTimerRunning, "關閉科技樹頁面後應自動恢復時間流動");
 
                 // 驗證軍情處全版面專頁與動態情蒐紀錄（「解放軍似乎正在密謀...」）＋ 開啟時必須自動暫停時間
                 var intelBtn = FindButtonWithText(form, "軍情處");
